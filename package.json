@@ -1,0 +1,32 @@
+{
+  "name": "enkode.app",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "type": "module",
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "check-types": "turbo run check-types",
+    "dev:web": "turbo run dev -F web --",
+    "dev:server": "turbo run dev -F @enkode.app/backend --",
+    "dev:setup": "turbo run dev:setup -F @enkode.app/backend --",
+    "check": "oxlint && oxfmt --write"
+  },
+  "dependencies": {
+    "@enkode.app/env": "workspace:*",
+    "dotenv": "catalog:",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@enkode.app/config": "workspace:*",
+    "@types/node": "^22.20.1",
+    "oxfmt": "^0.63.0",
+    "oxlint": "^1.78.0",
+    "turbo": "^2.10.7",
+    "typescript": "catalog:"
+  },
+  "packageManager": "pnpm@11.23.0"
+}
