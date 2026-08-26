@@ -71,6 +71,9 @@ export const createEventSignals = internalMutation({
     candidates: v.array(eventCandidate),
   },
   handler: async (ctx, input) => {
+    const workspace = await ctx.db.get(input.workspaceId);
+    if (!workspace) throw new ConvexError("Workspace not found");
+    await requireWritableAssignmentRelease(ctx, workspace.assignmentReleaseId);
     for (const candidate of input.candidates) {
       const existing = await ctx.db
         .query("integritySignals")
@@ -104,6 +107,9 @@ export const recordGap = internalMutation({
     ),
   },
   handler: async (ctx, input) => {
+    const workspace = await ctx.db.get(input.workspaceId);
+    if (!workspace) throw new ConvexError("Workspace not found");
+    await requireWritableAssignmentRelease(ctx, workspace.assignmentReleaseId);
     const existing = await ctx.db
       .query("integritySignals")
       .withIndex("by_evidence_key", (index) => index.eq("evidenceKey", input.evidenceKey))
@@ -139,6 +145,10 @@ export const recordSimilarity = internalMutation({
     ) {
       throw new ConvexError("Similarity comparison scope is invalid");
     }
+    await Promise.all([
+      requireWritableAssignmentRelease(ctx, submission.assignmentReleaseId),
+      requireWritableAssignmentRelease(ctx, related.assignmentReleaseId),
+    ]);
     const [snapshot, relatedSnapshot] = await Promise.all([
       ctx.db.get(submission.snapshotId),
       ctx.db.get(related.snapshotId),
@@ -217,6 +227,11 @@ export const review = mutation({
   handler: async (ctx, { signalId, state, note }) => {
     const { signal, user, workspace } = await requireSignalTeacher(ctx, signalId);
     await requireWritableAssignmentRelease(ctx, workspace.assignmentReleaseId);
+    if (signal.relatedWorkspaceId) {
+      const relatedWorkspace = await ctx.db.get(signal.relatedWorkspaceId);
+      if (!relatedWorkspace) throw new ConvexError("Integrity Signal evidence is unavailable");
+      await requireWritableAssignmentRelease(ctx, relatedWorkspace.assignmentReleaseId);
+    }
     let next;
     try {
       next = transitionIntegritySignal(signal.state, state);

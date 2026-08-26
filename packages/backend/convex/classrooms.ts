@@ -79,6 +79,7 @@ export const listMine = query({
         if (!classroom) return null;
         const course = await ctx.db.get(classroom.courseId);
         if (!course) return null;
+        if (course.archivedAt !== undefined) return null;
         return {
           ...classroom,
           courseName: course.name,

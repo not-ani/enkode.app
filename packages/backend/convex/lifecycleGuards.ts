@@ -20,6 +20,7 @@ export async function requireWritableClassroom(ctx: DatabaseCtx, classroomId: Id
   const classroom = await ctx.db.get(classroomId);
   if (!classroom) throw new ConvexError("Classroom not found");
   if (classroom.archivedAt !== undefined) readOnly("Classroom");
+  await requireWritableCourse(ctx, classroom.courseId);
   return classroom;
 }
 

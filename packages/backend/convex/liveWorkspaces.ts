@@ -64,6 +64,8 @@ export const listForTeacher = query({
           classroom.archivedAt !== undefined
         )
           return [];
+        const course = await ctx.db.get(classroom.courseId);
+        if (!course || course.archivedAt !== undefined) return [];
         const enrollments = await ctx.db
           .query("enrollments")
           .withIndex("by_classroom", (index) => index.eq("classroomId", classroomId))

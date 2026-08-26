@@ -56,7 +56,12 @@ export const listMine = query({
         )
           return null;
         const course = await ctx.db.get(classroom.courseId);
-        if (!course || course.organizationId !== user.organizationId) return null;
+        if (
+          !course ||
+          course.organizationId !== user.organizationId ||
+          course.archivedAt !== undefined
+        )
+          return null;
         return {
           enrollmentId: enrollment._id,
           classroomId: classroom._id,

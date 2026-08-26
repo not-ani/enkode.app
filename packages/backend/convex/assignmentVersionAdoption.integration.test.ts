@@ -253,4 +253,53 @@ describe("Assignment Version adoption", () => {
       }),
     ).rejects.toThrow("newer");
   });
+
+  it("keeps archived releases readable while blocking adoption and pending workspace merges", async () => {
+    const adoptionBackend = createTestBackend();
+    const adoption = await seed(adoptionBackend);
+    await adoption.teacher.mutation(api.archive.archiveAssignment, {
+      assignmentId: (await adoptionBackend.run((ctx) =>
+        ctx.db.get(adoption.firstVersionId as Id<"assignmentVersions">),
+      ))!.assignmentId,
+    });
+
+    await expect(
+      adoption.teacher.mutation(api.assignmentReleases.adoptVersion, {
+        assignmentReleaseId: adoption.assignmentReleaseId,
+        assignmentVersionId: adoption.secondVersionId,
+      }),
+    ).rejects.toThrow("read-only");
+    await expect(
+      adoption.teacher.query(api.assignmentReleases.previewAdoption, {
+        assignmentReleaseId: adoption.assignmentReleaseId,
+        assignmentVersionId: adoption.secondVersionId,
+      }),
+    ).resolves.toMatchObject({ fromVersion: { version: 1 }, toVersion: { version: 2 } });
+    await expect(
+      adoption.student.query(api.assignmentReleases.open, {
+        assignmentReleaseId: adoption.assignmentReleaseId,
+      }),
+    ).resolves.toMatchObject({ version: 1 });
+
+    const mergeBackend = createTestBackend();
+    const merge = await seed(mergeBackend);
+    await merge.teacher.mutation(api.assignmentReleases.adoptVersion, {
+      assignmentReleaseId: merge.assignmentReleaseId,
+      assignmentVersionId: merge.secondVersionId,
+    });
+    const pending = await merge.student.mutation(api.workspaces.open, {
+      assignmentReleaseId: merge.assignmentReleaseId,
+    });
+    await merge.teacher.mutation(api.archive.archiveClassroom, {
+      classroomId: merge.classroomId,
+    });
+    await expect(
+      merge.student.mutation(api.workspaces.completeVersionMerge, {
+        mergeId: pending.versionMerge!.mergeId,
+        decisions: [],
+        acknowledged: true,
+        requiredHistorySequence: 1,
+      }),
+    ).rejects.toThrow("read-only");
+  });
 });

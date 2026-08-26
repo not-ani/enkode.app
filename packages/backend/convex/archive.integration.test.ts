@@ -1,7 +1,7 @@
 import { convexTest } from "convex-test";
 import { describe, expect, it } from "vitest";
 
-import { api } from "./_generated/api";
+import { api, internal } from "./_generated/api";
 import schema from "./schema";
 
 const modules = import.meta.glob("./**/*.ts");
@@ -228,6 +228,70 @@ async function seedAcademicRecord(test: ReturnType<typeof backend>) {
 }
 
 describe("Archive lifecycle", () => {
+  it("treats a Course archive as read-only and hidden across its active descendants", async () => {
+    const test = backend();
+    const ids = await seedAcademicRecord(test);
+    const teacher = test.withIdentity({ subject: "teacher" });
+    const student = test.withIdentity({ subject: "student" });
+
+    await teacher.mutation(api.archive.archiveCourse, { courseId: ids.courseId });
+
+    await expect(teacher.query(api.classrooms.listMine, {})).resolves.toEqual([]);
+    await expect(student.query(api.enrollments.listMine, {})).resolves.toEqual([]);
+    await expect(student.query(api.assignmentReleases.listMine, {})).resolves.toEqual([]);
+    await expect(student.query(api.materialReleases.listMine, {})).resolves.toEqual([]);
+    await expect(teacher.query(api.liveWorkspaces.listForTeacher, {})).resolves.toEqual([]);
+    await expect(
+      teacher.mutation(api.classrooms.update, {
+        classroomId: ids.classroomId,
+        name: "Changed",
+      }),
+    ).rejects.toThrow("read-only");
+
+    const scheduledFor = Date.now() - 1;
+    await test.run(async (ctx) => {
+      await ctx.db.patch(ids.assignmentReleaseId, {
+        publicationState: "scheduled",
+        publishedAt: undefined,
+        scheduledFor,
+      });
+      await ctx.db.patch(ids.materialReleaseId, {
+        publicationState: "scheduled",
+        publishedAt: undefined,
+        scheduledFor,
+      });
+    });
+    await test.mutation(internal.assignmentReleases.publishScheduled, {
+      assignmentReleaseId: ids.assignmentReleaseId,
+      scheduledFor,
+    });
+    await test.mutation(internal.materialReleases.publishScheduled, {
+      materialReleaseId: ids.materialReleaseId,
+      scheduledFor,
+    });
+    await expect(
+      test.run(async (ctx) => {
+        const [assignmentRelease, materialRelease] = await Promise.all([
+          ctx.db.get(ids.assignmentReleaseId),
+          ctx.db.get(ids.materialReleaseId),
+        ]);
+        return [assignmentRelease?.publicationState, materialRelease?.publicationState];
+      }),
+    ).resolves.toEqual(["scheduled", "scheduled"]);
+
+    await expect(
+      student.query(api.assignmentReleases.open, {
+        assignmentReleaseId: ids.assignmentReleaseId,
+      }),
+    ).resolves.toMatchObject({ assignmentTitle: "Hello" });
+    await expect(
+      teacher.query(api.submissions.forTeacher, {
+        assignmentReleaseId: ids.assignmentReleaseId,
+        studentId: (await test.run((ctx) => ctx.db.get(ids.submissionId)))!.studentId,
+      }),
+    ).resolves.toHaveLength(1);
+  });
+
   it("archives every target, removes active navigation, preserves records, and keeps history readable", async () => {
     const test = backend();
     const ids = await seedAcademicRecord(test);

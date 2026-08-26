@@ -308,6 +308,8 @@ export const publishScheduled = internalMutation({
       ctx.db.get(release.materialId),
     ]);
     if (!classroom || !material || isArchived(classroom) || isArchived(material)) return;
+    const course = await ctx.db.get(classroom.courseId);
+    if (!course || isArchived(course)) return;
     await ctx.db.patch(release._id, {
       publicationState: "published",
       scheduledFor: undefined,
@@ -380,6 +382,8 @@ export const listMine = query({
           classroom.archivedAt !== undefined
         )
           return [];
+        const course = await ctx.db.get(classroom.courseId);
+        if (!course || course.archivedAt !== undefined) return [];
         const releases = await ctx.db
           .query("materialReleases")
           .withIndex("by_classroom", (index) => index.eq("classroomId", classroom._id))

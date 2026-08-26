@@ -259,4 +259,35 @@ describe("Similarity Signals", () => {
     expect(signal).not.toHaveProperty("misconduct");
     expect(signal).not.toHaveProperty("risk");
   });
+
+  it("keeps archived similarity evidence readable but makes either related Classroom read-only", async () => {
+    const backend = convexTest(schema, modules);
+    const data = await seed(backend);
+    const signalId = await backend.mutation(internal.integritySignals.recordSimilarity, {
+      submissionId: data.first.submissionId,
+      relatedSubmissionId: data.second.submissionId,
+      matchedSpans,
+    });
+    if (!signalId) throw new Error("Expected Similarity Signal");
+
+    await backend
+      .withIdentity({ subject: "second-teacher" })
+      .mutation(api.archive.archiveClassroom, { classroomId: data.second.classroomId });
+
+    const teacher = backend.withIdentity({ subject: "north-teacher" });
+    await expect(
+      teacher.action(api.integritySignalEvidence.inspect, { signalId }),
+    ).resolves.toMatchObject({ similarity: { matchedSpans } });
+    await expect(
+      teacher.query(api.integritySignals.listForWorkspace, {
+        workspaceId: data.first.workspaceId,
+      }),
+    ).resolves.toEqual(expect.arrayContaining([expect.objectContaining({ _id: signalId })]));
+    await expect(
+      teacher.mutation(api.integritySignals.review, {
+        signalId,
+        state: "dismissed",
+      }),
+    ).rejects.toThrow("read-only");
+  });
 });
