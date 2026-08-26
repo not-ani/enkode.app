@@ -36,6 +36,12 @@ type WorkspaceEditorProps = {
   onSave: (files: WorkspaceFile[]) => Promise<void>;
   onUploadHistory: (chunk: WorkHistoryChunk) => Promise<{ acknowledgedThrough: number }>;
   onRun: (files: WorkspaceFile[]) => Promise<RunResult>;
+  onSubmit: (
+    files: WorkspaceFile[],
+    requiredHistorySequence: number,
+    idempotencyKey: string,
+  ) => Promise<SubmissionResult>;
+  submissions: SubmissionResult[];
 };
 
 export type RunResult = {
@@ -55,6 +61,21 @@ export type RunResult = {
   }[];
 };
 
+export type SubmissionResult = {
+  _id: string;
+  attemptNumber: number;
+  proposedPoints: number;
+  submittedAt: number;
+  current?: boolean;
+  testResults: {
+    visibility: "public" | "hidden";
+    name?: string;
+    weight: number;
+    passed: boolean;
+    guidance?: string;
+  }[];
+};
+
 export default function WorkspaceEditor({
   assignmentReleaseId,
   workspaceId,
@@ -64,6 +85,8 @@ export default function WorkspaceEditor({
   onSave,
   onUploadHistory,
   onRun,
+  onSubmit,
+  submissions,
 }: WorkspaceEditorProps) {
   const draftStore = useMemo(
     () =>
@@ -83,6 +106,8 @@ export default function WorkspaceEditor({
   const [error, setError] = useState<string>();
   const [runState, setRunState] = useState<"idle" | "running">("idle");
   const [runResult, setRunResult] = useState<RunResult>();
+  const [submitState, setSubmitState] = useState<"idle" | "submitting">("idle");
+  const [submissionResult, setSubmissionResult] = useState<SubmissionResult>();
   const languageService = useMemo(
     () =>
       new RemotePythonLanguageService(
@@ -98,6 +123,8 @@ export default function WorkspaceEditor({
   const initialFiles = useRef(state.files);
   const latest = useRef({ state, saveState });
   const historyRecorder = useRef<WorkHistoryRecorder | undefined>(undefined);
+  const historySync = useRef<WorkHistorySync | undefined>(undefined);
+  const submitRequestId = useRef<string | undefined>(undefined);
   const activeFile = state.files.find(({ path }) => path === state.activePath) ?? state.files[0]!;
 
   useEffect(() => {
@@ -157,6 +184,7 @@ export default function WorkspaceEditor({
           () => void sync?.drain(),
         );
         historyRecorder.current = recorder;
+        historySync.current = sync;
         sync.start();
         recorder.start();
       })
@@ -164,6 +192,7 @@ export default function WorkspaceEditor({
     return () => {
       disposed = true;
       if (historyRecorder.current === recorder) historyRecorder.current = undefined;
+      if (historySync.current === sync) historySync.current = undefined;
       void recorder?.flush();
       sync?.stop();
     };
@@ -260,6 +289,37 @@ export default function WorkspaceEditor({
     }
   }
 
+  async function submit() {
+    setSubmitState("submitting");
+    setSubmissionResult(undefined);
+    setError(undefined);
+    try {
+      if (saveState === "dirty") {
+        await onSave(state.files);
+        draftStore?.remove(assignmentReleaseId);
+        setSaveState("saved");
+      }
+      const recorder = historyRecorder.current;
+      const sync = historySync.current;
+      if (!recorder || !sync) throw new Error("Work History is still starting");
+      const requiredHistorySequence = await recorder.finalize();
+      await sync.drainRequired();
+      const idempotencyKey = (submitRequestId.current ??= crypto.randomUUID());
+      const result = await onSubmit(state.files, requiredHistorySequence, idempotencyKey);
+      submitRequestId.current = undefined;
+      setSubmissionResult(result);
+      recorder.recordSubmission({
+        submissionId: result._id,
+        attemptNumber: result.attemptNumber,
+        proposedPoints: result.proposedPoints,
+      });
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not Submit this Workspace");
+    } finally {
+      setSubmitState("idle");
+    }
+  }
+
   return (
     <section className="grid min-h-[36rem] overflow-hidden border border-foreground/10 lg:grid-cols-[13rem_minmax(0,1fr)]">
       <aside className="border-b border-foreground/10 bg-muted/30 lg:border-r lg:border-b-0">
@@ -300,10 +360,21 @@ export default function WorkspaceEditor({
             <Button
               type="button"
               size="sm"
-              disabled={runState === "running"}
+              disabled={runState === "running" || submitState === "submitting"}
               onClick={() => void run()}
             >
               {runState === "running" ? "Running…" : "Run"}
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={
+                submitState === "submitting" || runState === "running" || saveState === "saving"
+              }
+              onClick={() => void submit()}
+            >
+              {submitState === "submitting" ? "Submitting…" : "Submit"}
             </Button>
             <Button
               type="button"
@@ -333,6 +404,7 @@ export default function WorkspaceEditor({
               onMount={mountEditor}
               onChange={(content) => {
                 const nextContent = content ?? "";
+                submitRequestId.current = undefined;
                 setState((current) => editWorkspaceFile(current, activeFile.path, nextContent));
                 setSaveState("dirty");
                 languageService.updateFile(activeFile.path, nextContent);
@@ -349,6 +421,55 @@ export default function WorkspaceEditor({
         </div>
       </div>
       {runResult ? <RunResults result={runResult} /> : null}
+      {submissionResult ? <SubmissionResults result={submissionResult} /> : null}
+      {submissions.length > 0 ? <SubmissionHistory submissions={submissions} /> : null}
+    </section>
+  );
+}
+
+function SubmissionResults({ result }: { result: SubmissionResult }) {
+  return (
+    <section
+      className="border-t border-foreground/10 bg-muted/20 p-4 lg:col-span-2"
+      aria-label="Submission results"
+    >
+      <h2 className="font-medium">Attempt {result.attemptNumber} submitted</h2>
+      <p className="mt-1 text-sm text-muted-foreground">Proposed points: {result.proposedPoints}</p>
+      <ul className="mt-3 grid gap-2">
+        {result.testResults.map((test, index) => (
+          <li
+            className="border border-foreground/10 bg-background px-3 py-2 text-sm"
+            key={`${test.visibility}-${index}`}
+          >
+            <span>
+              {test.visibility === "public" ? test.name : "Hidden test"}:{" "}
+              {test.passed ? "Passed" : "Failed"}
+            </span>
+            {test.visibility === "hidden" && test.guidance ? (
+              <p className="mt-1 text-muted-foreground">{test.guidance}</p>
+            ) : null}
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+function SubmissionHistory({ submissions }: { submissions: SubmissionResult[] }) {
+  return (
+    <section
+      className="border-t border-foreground/10 p-4 lg:col-span-2"
+      aria-label="Submission history"
+    >
+      <h2 className="font-medium">Submission history</h2>
+      <ol className="mt-2 grid gap-1 text-sm text-muted-foreground">
+        {submissions.map((submission) => (
+          <li key={submission._id}>
+            Attempt {submission.attemptNumber} · {submission.proposedPoints} proposed points
+            {submission.current ? " · Current" : ""}
+          </li>
+        ))}
+      </ol>
     </section>
   );
 }

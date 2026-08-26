@@ -68,6 +68,42 @@ describe("Work History capture", () => {
     expect((await snapshotIn(chunk!.snapshotBytes)).files).toEqual(files);
   });
 
+  it("seals the current files and requires durable acknowledgement before Submit", async () => {
+    const outbox = createMemoryWorkHistoryOutbox();
+    const recorder = new WorkHistoryRecorder(
+      "workspace-1",
+      outbox,
+      () => files,
+      () => undefined,
+    );
+    recorder.start();
+    const requiredSequence = await recorder.finalize();
+    expect(requiredSequence).toBe(2);
+    const offline = new WorkHistorySync("workspace-1", outbox, async () => {
+      throw new Error("offline");
+    });
+    await expect(offline.drainRequired()).rejects.toThrow("offline");
+    expect(await outbox.chunks("workspace-1")).toHaveLength(1);
+
+    const online = new WorkHistorySync("workspace-1", outbox, async (chunk) => ({
+      acknowledgedThrough: chunk.endSequence,
+    }));
+    await online.drainRequired();
+    expect(await outbox.chunks("workspace-1")).toEqual([]);
+
+    recorder.recordSubmission({
+      submissionId: "submission-1",
+      attemptNumber: 1,
+      proposedPoints: 3,
+    });
+    await settleCapture();
+    await recorder.flush();
+    const [submissionChunk] = await outbox.chunks("workspace-1");
+    expect(await eventsIn(submissionChunk!.bytes)).toEqual([
+      expect.objectContaining({ type: "submission", submissionId: "submission-1", sequence: 3 }),
+    ]);
+  });
+
   it("records every observed Edit Origin and preserves unattributed changes honestly", async () => {
     const outbox = createMemoryWorkHistoryOutbox();
     const recorder = new WorkHistoryRecorder(

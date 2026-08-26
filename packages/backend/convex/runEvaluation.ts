@@ -1,10 +1,10 @@
 import type { Doc } from "./_generated/dataModel";
 import type { ExecutionFile, ExecutionResult, ExecutionService } from "./execution";
 
-type PublicTest = Doc<"evaluationTests">;
+type EvaluationTest = Doc<"evaluationTests">;
 
 export type PublicTestResult = {
-  evaluationTestId: PublicTest["_id"];
+  evaluationTestId: EvaluationTest["_id"];
   name: string;
   passed: boolean;
   stdout: string;
@@ -18,8 +18,34 @@ export async function evaluateRun(
     runtimeVersion: string;
     entrypoint: string;
     files: ExecutionFile[];
-    publicTests: PublicTest[];
+    publicTests: EvaluationTest[];
   },
+) {
+  const executionResult = await execution.execute({
+    runtime: { language: "python", version: input.runtimeVersion },
+    entrypoint: input.entrypoint,
+    files: input.files,
+  });
+  const publicTestResults: PublicTestResult[] = [];
+  for (const test of input.publicTests.filter(({ visibility }) => visibility === "public")) {
+    const result = await evaluateTest(execution, input, test);
+    publicTestResults.push({
+      evaluationTestId: test._id,
+      name: test.name,
+      passed: result.passed,
+      stdout: result.stdout,
+      stderr: result.stderr,
+      exitCode: result.exitCode,
+    });
+  }
+  return { execution: executionResult, publicTestResults };
+}
+
+/** Shared platform-owned test runner used by public Run and full Submission evaluation. */
+export async function evaluateTest(
+  execution: ExecutionService,
+  input: { runtimeVersion: string; entrypoint: string; files: ExecutionFile[] },
+  test: EvaluationTest,
 ) {
   const request = (entrypoint: string, files: ExecutionFile[], stdin?: string) =>
     execution.execute({
@@ -28,31 +54,19 @@ export async function evaluateRun(
       files,
       stdin,
     });
-  const executionResult = await request(input.entrypoint, input.files);
-  const publicTestResults: PublicTestResult[] = [];
-  for (const test of input.publicTests.filter(({ visibility }) => visibility === "public")) {
-    let result: ExecutionResult;
-    let passed: boolean;
-    if (test.kind === "input_output") {
-      result = await request(input.entrypoint, input.files, test.stdin);
-      passed = result.status === "completed" && result.stdout === test.expectedOutput;
-    } else {
-      let harnessPath = `__enkode_public_test_${test.order}.py`;
-      while (input.files.some(({ path }) => path === harnessPath)) harnessPath = `_${harnessPath}`;
-      result = await request(harnessPath, [
-        { path: harnessPath, content: test.harness! },
-        ...input.files,
-      ]);
-      passed = result.status === "completed";
-    }
-    publicTestResults.push({
-      evaluationTestId: test._id,
-      name: test.name,
-      passed,
-      stdout: result.stdout,
-      stderr: result.stderr,
-      exitCode: result.exitCode,
-    });
+  let result: ExecutionResult;
+  let passed: boolean;
+  if (test.kind === "input_output") {
+    result = await request(input.entrypoint, input.files, test.stdin);
+    passed = result.status === "completed" && result.stdout === test.expectedOutput;
+  } else {
+    let harnessPath = `__enkode_${test.visibility}_test_${test.order}.py`;
+    while (input.files.some(({ path }) => path === harnessPath)) harnessPath = `_${harnessPath}`;
+    result = await request(harnessPath, [
+      { path: harnessPath, content: test.harness! },
+      ...input.files,
+    ]);
+    passed = result.status === "completed";
   }
-  return { execution: executionResult, publicTestResults };
+  return { ...result, passed };
 }
