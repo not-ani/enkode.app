@@ -13,6 +13,7 @@ import MaterialAuthoring from "@/components/material-authoring";
 import MaterialReleases, { StudentMaterials } from "@/components/material-releases";
 import LiveWorkspaces from "@/components/live-workspaces";
 import Grading from "@/components/grading";
+import Gradebook from "@/components/gradebook";
 import StudentManagement from "@/components/student-management";
 import WorkHistoryList from "@/components/work-history-list";
 import ArchiveActions from "@/components/archive-actions";
@@ -239,6 +240,7 @@ function DashboardContent() {
         </div>
         <ClassroomEnrollments classrooms={classrooms} />
         <AssignmentReleases classrooms={classrooms} />
+        <Gradebook classrooms={classrooms} />
         <Grading classrooms={classrooms} />
         <MaterialReleases classrooms={classrooms} />
         <LiveWorkspaces />

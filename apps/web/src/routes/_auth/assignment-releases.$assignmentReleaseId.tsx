@@ -48,7 +48,7 @@ type Workspace = {
 };
 
 type ReturnedGrade = {
-  status: "awaiting_submission" | "awaiting_review" | "returned";
+  status: "awaiting_submission" | "submitted" | "awaiting_review" | "returned" | "excused";
   returned: null | {
     points: number;
     proposedPoints: number;

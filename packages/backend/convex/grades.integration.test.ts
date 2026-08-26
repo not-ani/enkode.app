@@ -173,7 +173,7 @@ describe("grading and explicit return", () => {
       await student.query(api.grades.mine, {
         assignmentReleaseId: seeded.assignmentReleaseId,
       }),
-    ).toEqual({ status: "awaiting_review", returned: null });
+    ).toEqual({ status: "submitted", returned: null });
 
     await teacher.mutation(api.grades.returnGrade, { gradeId });
     const visible = await student.query(api.grades.mine, {

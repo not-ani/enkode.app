@@ -5,13 +5,14 @@ import { deriveAssignmentStatus, validateGradePoints, validateInlineFeedback } f
 describe("Grade policy", () => {
   it("derives review state without mutating a Submission", () => {
     expect(deriveAssignmentStatus({})).toBe("awaiting_submission");
-    expect(deriveAssignmentStatus({ latestSubmissionAttempt: 1 })).toBe("awaiting_review");
+    expect(deriveAssignmentStatus({ latestSubmissionAttempt: 1 })).toBe("submitted");
     expect(
       deriveAssignmentStatus({ latestSubmissionAttempt: 1, returnedSubmissionAttempt: 1 }),
     ).toBe("returned");
     expect(
       deriveAssignmentStatus({ latestSubmissionAttempt: 2, returnedSubmissionAttempt: 1 }),
     ).toBe("awaiting_review");
+    expect(deriveAssignmentStatus({ excused: true, latestSubmissionAttempt: 1 })).toBe("excused");
   });
 
   it("validates score overrides and immutable inline anchors", () => {

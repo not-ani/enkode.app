@@ -6,13 +6,13 @@ import { useMutation, useQuery } from "convex/react";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 
 type Classroom = { _id: string; name: string; courseName: string };
-type QueueRow = {
+export type QueueRow = {
   assignmentReleaseId: string;
   assignmentTitle: string;
   studentId: string;
   studentName: string;
   attemptCount: number;
-  status: "awaiting_review" | "returned";
+  status: "submitted" | "awaiting_review" | "returned";
 };
 type InlineFeedback = {
   path: string;
@@ -42,7 +42,7 @@ type Review = {
     inlineFeedback: InlineFeedback[];
   };
   returned?: { revision: number; returnedAt: number };
-  status: "awaiting_review" | "returned";
+  status: "submitted" | "awaiting_review" | "returned";
 };
 
 function messageFrom(error: unknown) {
@@ -135,7 +135,7 @@ export default function Grading({ classrooms }: { classrooms: Classroom[] }) {
   );
 }
 
-function GradeEditor({ row }: { row: QueueRow }) {
+export function GradeEditor({ row }: { row: QueueRow }) {
   const review = useQuery(api.grades.review, {
     assignmentReleaseId: row.assignmentReleaseId,
     studentId: row.studentId,

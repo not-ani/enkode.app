@@ -1,6 +1,11 @@
 import { ConvexError } from "convex/values";
 
-export type AssignmentStatus = "awaiting_submission" | "awaiting_review" | "returned";
+export type AssignmentStatus =
+  | "awaiting_submission"
+  | "submitted"
+  | "awaiting_review"
+  | "returned"
+  | "excused";
 
 export function validateGradePoints(points: number, availablePoints: number) {
   if (!Number.isFinite(points) || points < 0 || points > availablePoints) {
@@ -40,14 +45,14 @@ export function validateInlineFeedback(input: {
 }
 
 export function deriveAssignmentStatus(input: {
+  excused?: boolean;
   latestSubmissionAttempt?: number;
   returnedSubmissionAttempt?: number;
 }): AssignmentStatus {
+  if (input.excused) return "excused";
   if (input.latestSubmissionAttempt === undefined) return "awaiting_submission";
-  if (
-    input.returnedSubmissionAttempt !== undefined &&
-    input.returnedSubmissionAttempt >= input.latestSubmissionAttempt
-  ) {
+  if (input.returnedSubmissionAttempt === undefined) return "submitted";
+  if (input.returnedSubmissionAttempt >= input.latestSubmissionAttempt) {
     return "returned";
   }
   return "awaiting_review";
