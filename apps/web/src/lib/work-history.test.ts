@@ -130,6 +130,41 @@ describe("Work History capture", () => {
     ]);
   });
 
+  it("records an accepted Assignment Version merge as a replayable Edit Origin", async () => {
+    const mergedFiles = [
+      { path: "main.py", content: "print('student')\n" },
+      { path: "notes.txt", content: "New starter notes\n" },
+    ];
+    const outbox = createMemoryWorkHistoryOutbox();
+    let currentFiles = files;
+    const recorder = new WorkHistoryRecorder(
+      "workspace-1",
+      outbox,
+      () => currentFiles,
+      () => undefined,
+    );
+    recorder.start();
+    currentFiles = mergedFiles;
+    recorder.recordAssignmentVersionMerge({
+      files: mergedFiles,
+      fromAssignmentVersionId: "version-1",
+      toAssignmentVersionId: "version-2",
+      acceptedPaths: ["notes.txt"],
+    });
+    await settleCapture();
+    await recorder.flush();
+
+    const [chunk] = await outbox.chunks("workspace-1");
+    const events = await eventsIn(chunk!.bytes);
+    expect(events[1]).toMatchObject({
+      type: "assignment_version_merge",
+      origin: "assignment-version-merge",
+      acceptedPaths: ["notes.txt"],
+      files: mergedFiles,
+    });
+    expect((await snapshotIn(chunk!.snapshotBytes)).files).toEqual(mergedFiles);
+  });
+
   it("keeps ordered chunks across an outbox reload and removes only contiguous acknowledgements", async () => {
     const first = createMemoryWorkHistoryOutbox();
     await first.enqueue("workspace-1", {

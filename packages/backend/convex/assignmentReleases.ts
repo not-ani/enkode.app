@@ -5,6 +5,7 @@ import type { QueryCtx } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { internalMutation, mutation, query } from "./_generated/server";
 import { studentVisibleEvaluationTest } from "./assignmentPolicy";
+import { mergePlan } from "./assignmentVersionMerge";
 import { appendAuditEvent } from "./audit";
 import { requireClassroomTeacher, requireRole } from "./authorization";
 import {
@@ -45,10 +46,34 @@ async function releaseSummary(ctx: QueryCtx, release: Doc<"assignmentReleases">)
     ...release,
     assignmentTitle: assignment.title,
     version: version.version,
+    latestVersion: assignment.latestVersion,
     language: version.language,
     runtimeVersion: version.runtimeVersion,
     publicationStatus: releasePublicationStatus(release),
   };
+}
+
+async function requireAdoptionTarget(
+  ctx: QueryCtx,
+  release: Doc<"assignmentReleases">,
+  assignmentVersionId: Id<"assignmentVersions">,
+) {
+  const [current, target] = await Promise.all([
+    ctx.db.get(release.assignmentVersionId),
+    ctx.db.get(assignmentVersionId),
+  ]);
+  if (
+    !current ||
+    !target ||
+    target.organizationId !== release.organizationId ||
+    target.assignmentId !== release.assignmentId
+  ) {
+    throw new ConvexError("Assignment Version is not available for this release");
+  }
+  if (target.version <= current.version) {
+    throw new ConvexError("Choose an Assignment Version newer than the release's current version");
+  }
+  return { current, target };
 }
 
 async function requireEditableRelease(
@@ -294,6 +319,82 @@ export const listForClassroom = query({
       .withIndex("by_classroom", (index) => index.eq("classroomId", classroomId))
       .collect();
     return await Promise.all(releases.map((release) => releaseSummary(ctx, release)));
+  },
+});
+
+export const previewAdoption = query({
+  args: {
+    assignmentReleaseId: v.id("assignmentReleases"),
+    assignmentVersionId: v.id("assignmentVersions"),
+  },
+  handler: async (ctx, { assignmentReleaseId, assignmentVersionId }) => {
+    const release = await ctx.db.get(assignmentReleaseId);
+    if (!release) throw new ConvexError("Assignment Release not found");
+    await requireClassroomTeacher(ctx, release.classroomId);
+    const { current, target } = await requireAdoptionTarget(ctx, release, assignmentVersionId);
+    return await mergePlan(ctx, current, target);
+  },
+});
+
+export const adoptVersion = mutation({
+  args: {
+    assignmentReleaseId: v.id("assignmentReleases"),
+    assignmentVersionId: v.id("assignmentVersions"),
+  },
+  handler: async (ctx, { assignmentReleaseId, assignmentVersionId }) => {
+    const { release, user } = await requireEditableRelease(ctx, assignmentReleaseId);
+    const { current, target } = await requireAdoptionTarget(ctx, release, assignmentVersionId);
+    const workspaces = await ctx.db
+      .query("workspaces")
+      .withIndex("by_assignment_release", (index) =>
+        index.eq("assignmentReleaseId", assignmentReleaseId),
+      )
+      .collect();
+    const now = Date.now();
+    const adoptionId = await ctx.db.insert("assignmentReleaseAdoptions", {
+      organizationId: release.organizationId,
+      assignmentReleaseId,
+      fromAssignmentVersionId: current._id,
+      toAssignmentVersionId: target._id,
+      adoptedBy: user._id,
+      adoptedAt: now,
+    });
+    let workspacesAwaitingMerge = 0;
+
+    for (const workspace of workspaces) {
+      const pending = await ctx.db
+        .query("workspaceVersionMerges")
+        .withIndex("by_workspace_status", (index) =>
+          index.eq("workspaceId", workspace._id).eq("status", "pending"),
+        )
+        .collect();
+      for (const merge of pending) await ctx.db.patch(merge._id, { status: "superseded" });
+
+      const workspaceVersion = await ctx.db.get(workspace.assignmentVersionId);
+      if (!workspaceVersion) throw new ConvexError("Workspace Assignment Version is unavailable");
+      const workspacePlan = await mergePlan(ctx, workspaceVersion, target);
+      const status = workspacePlan.changedStarterFiles.length === 0 ? "completed" : "pending";
+      if (status === "pending") workspacesAwaitingMerge += 1;
+      await ctx.db.insert("workspaceVersionMerges", {
+        organizationId: release.organizationId,
+        workspaceId: workspace._id,
+        assignmentReleaseId,
+        adoptionId,
+        fromAssignmentVersionId: workspaceVersion._id,
+        toAssignmentVersionId: target._id,
+        status,
+        createdAt: now,
+        completedAt: status === "completed" ? now : undefined,
+        decisions: status === "completed" ? [] : undefined,
+      });
+      if (status === "completed") {
+        await ctx.db.patch(workspace._id, { assignmentVersionId: target._id, updatedAt: now });
+      }
+    }
+
+    await ctx.db.patch(release._id, { assignmentVersionId: target._id });
+    await auditRelease(ctx, release, user._id, "assignment_release.version_adopted");
+    return { adoptionId, workspacesAwaitingMerge };
   },
 });
 

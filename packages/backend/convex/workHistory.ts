@@ -64,6 +64,16 @@ export const commitChunk = internalMutation({
     snapshotObjectKey: v.optional(v.string()),
     snapshotByteLength: v.optional(v.number()),
     signalCandidates: v.optional(v.array(eventCandidate)),
+    assignmentVersionMerges: v.optional(
+      v.array(
+        v.object({
+          sequence: v.number(),
+          fromAssignmentVersionId: v.string(),
+          toAssignmentVersionId: v.string(),
+          acceptedPaths: v.array(v.string()),
+        }),
+      ),
+    ),
   },
   handler: async (ctx, manifest) => {
     const workspace = await ctx.db.get(manifest.workspaceId);
@@ -128,6 +138,14 @@ export const commitChunk = internalMutation({
       encoding: "gzip-json-v1",
       committedAt: Date.now(),
     });
+    for (const merge of manifest.assignmentVersionMerges ?? []) {
+      await ctx.db.insert("workspaceAssignmentVersionMergeEvents", {
+        organizationId: manifest.organizationId,
+        workspaceId: manifest.workspaceId,
+        ...merge,
+        committedAt: Date.now(),
+      });
+    }
     for (const candidate of manifest.signalCandidates ?? []) {
       await ctx.db.insert("integritySignals", {
         organizationId: manifest.organizationId,

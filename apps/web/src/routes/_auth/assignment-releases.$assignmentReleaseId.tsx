@@ -8,7 +8,7 @@ import WorkspaceEditor, {
   type SubmissionResult,
 } from "@/components/workspace-editor";
 import { WorkspaceViewers } from "@/components/live-workspace-viewer";
-import type { WorkspaceFile } from "@/lib/workspace-state";
+import type { StarterFileDecision, StarterFileMerge, WorkspaceFile } from "@/lib/workspace-state";
 import type { WorkHistoryChunk } from "@/lib/work-history";
 
 export const Route = createFileRoute("/_auth/assignment-releases/$assignmentReleaseId")({
@@ -22,11 +22,23 @@ type Release = {
   instructions: string;
   runtimeVersion: string;
   entrypoint: string;
+  version: number;
 };
 
 type Workspace = {
   _id: string;
   files: WorkspaceFile[];
+  runtimeVersion: string;
+  entrypoint: string;
+  version: number;
+  versionMerge?: {
+    mergeId: string;
+    fromVersion: number;
+    toVersion: number;
+    fromAssignmentVersionId: string;
+    toAssignmentVersionId: string;
+    changedStarterFiles: StarterFileMerge[];
+  };
 };
 
 function AssignmentWorkspaceRoute() {
@@ -36,6 +48,7 @@ function AssignmentWorkspaceRoute() {
     | undefined;
   const openWorkspace = useMutation(api.workspaces.open);
   const saveWorkspace = useMutation(api.workspaces.save);
+  const completeVersionMerge = useMutation(api.workspaces.completeVersionMerge);
   const acceptHistoryChunk = useAction(api.workHistoryUpload.acceptChunk);
   const runWorkspace = useAction(api.runs.run);
   const submitWorkspace = useAction(api.submissionUpload.submit);
@@ -97,7 +110,9 @@ function AssignmentWorkspaceRoute() {
             </h1>
           </div>
           <p className="text-sm text-muted-foreground">
-            Python {release.runtimeVersion} · Editing available
+            Python {workspace.runtimeVersion} · Workspace Version {workspace.version}
+            {workspace.versionMerge ? ` · Release Version ${release.version}` : ""} · Editing
+            available
           </p>
         </header>
         <details className="border-y border-foreground/10 py-3">
@@ -111,8 +126,22 @@ function AssignmentWorkspaceRoute() {
           assignmentReleaseId={assignmentReleaseId}
           workspaceId={workspace._id}
           files={workspace.files}
-          entrypoint={release.entrypoint}
-          runtimeVersion={release.runtimeVersion}
+          entrypoint={workspace.entrypoint}
+          runtimeVersion={workspace.runtimeVersion}
+          versionMerge={workspace.versionMerge}
+          onCompleteVersionMerge={async (
+            mergeId: string,
+            decisions: StarterFileDecision[],
+            requiredHistorySequence: number,
+          ) => {
+            const updated = (await completeVersionMerge({
+              mergeId,
+              decisions,
+              acknowledged: true,
+              requiredHistorySequence,
+            })) as Workspace;
+            setWorkspace(updated);
+          }}
           onUploadHistory={uploadHistory}
           onRun={async (files) =>
             (await runWorkspace({ workspaceId: workspace._id, files })) as RunResult

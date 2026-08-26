@@ -144,6 +144,21 @@ export const acceptChunk = action({
         input.startSequence === expectedSequence
           ? eventSignalCandidates(input.workspaceId, baselineFiles, decoded.events)
           : undefined,
+      assignmentVersionMerges:
+        input.startSequence === expectedSequence
+          ? decoded.events.flatMap((event) =>
+              event.type === "assignment_version_merge"
+                ? [
+                    {
+                      sequence: event.sequence,
+                      fromAssignmentVersionId: event.fromAssignmentVersionId,
+                      toAssignmentVersionId: event.toAssignmentVersionId,
+                      acceptedPaths: event.acceptedPaths,
+                    },
+                  ]
+                : [],
+            )
+          : undefined,
     });
     return result;
   },

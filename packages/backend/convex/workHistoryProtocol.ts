@@ -112,16 +112,44 @@ export function validateChunkPayload(
   for (const [index, event] of candidate.events.entries()) {
     const expectedSequence = manifest.startSequence + index;
     if (!event || typeof event !== "object") throw new Error("Invalid Work History event");
-    const record = event as { sequence?: unknown; type?: unknown; origin?: unknown };
+    const record = event as {
+      sequence?: unknown;
+      type?: unknown;
+      origin?: unknown;
+      files?: unknown;
+      fromAssignmentVersionId?: unknown;
+      toAssignmentVersionId?: unknown;
+      acceptedPaths?: unknown;
+    };
     if (record.sequence !== expectedSequence) {
       throw new Error("Work History payload contains a missing or reordered sequence");
     }
-    if (record.type === "file_change" && !origins.has(String(record.origin))) {
+    if (
+      (record.type === "file_change" || record.type === "assignment_version_merge") &&
+      !origins.has(String(record.origin))
+    ) {
       throw new Error("Work History file change needs an observed or unattributed origin");
+    }
+    if (
+      record.type === "assignment_version_merge" &&
+      record.origin !== "assignment-version-merge"
+    ) {
+      throw new Error("Assignment Version merge needs the assignment-version-merge origin");
+    }
+    if (
+      record.type === "assignment_version_merge" &&
+      (!Array.isArray(record.files) ||
+        typeof record.fromAssignmentVersionId !== "string" ||
+        typeof record.toAssignmentVersionId !== "string" ||
+        !Array.isArray(record.acceptedPaths) ||
+        !record.acceptedPaths.every((path) => typeof path === "string"))
+    ) {
+      throw new Error("Assignment Version merge metadata is invalid");
     }
     if (
       record.type !== "file_change" &&
       record.type !== "workspace_state" &&
+      record.type !== "assignment_version_merge" &&
       record.type !== "run" &&
       record.type !== "submission"
     ) {

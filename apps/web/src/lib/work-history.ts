@@ -23,6 +23,15 @@ export type FileChange = {
 export type WorkHistoryEvent =
   | { type: "workspace_state"; files: WorkspaceFile[]; observedAt: number }
   | {
+      type: "assignment_version_merge";
+      files: WorkspaceFile[];
+      fromAssignmentVersionId: string;
+      toAssignmentVersionId: string;
+      acceptedPaths: string[];
+      origin: "assignment-version-merge";
+      observedAt: number;
+    }
+  | {
       type: "file_change";
       path: string;
       changes: FileChange[];
@@ -116,7 +125,7 @@ async function createChunk(
 function applyEvents(startingFiles: WorkspaceFile[], events: StoredHistoryEvent[]) {
   let files = startingFiles.map((file) => ({ ...file }));
   for (const event of events) {
-    if (event.type === "workspace_state") {
+    if (event.type === "workspace_state" || event.type === "assignment_version_merge") {
       files = event.files.map((file) => ({ ...file }));
       continue;
     }
@@ -378,6 +387,20 @@ export class WorkHistoryRecorder {
     proposedPoints: number;
   }) {
     this.capture({ type: "submission", ...submission, observedAt: Date.now() });
+  }
+
+  recordAssignmentVersionMerge(merge: {
+    files: WorkspaceFile[];
+    fromAssignmentVersionId: string;
+    toAssignmentVersionId: string;
+    acceptedPaths: string[];
+  }) {
+    this.capture({
+      type: "assignment_version_merge",
+      ...merge,
+      origin: "assignment-version-merge",
+      observedAt: Date.now(),
+    });
   }
 
   async finalize() {

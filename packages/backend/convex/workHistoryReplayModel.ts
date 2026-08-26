@@ -9,6 +9,16 @@ export type ReplayEvent =
     }
   | {
       sequence: number;
+      type: "assignment_version_merge";
+      files: ReplayFile[];
+      fromAssignmentVersionId: string;
+      toAssignmentVersionId: string;
+      acceptedPaths: string[];
+      origin: "assignment-version-merge";
+      observedAt: number;
+    }
+  | {
+      sequence: number;
       type: "file_change";
       path: string;
       changes: { rangeOffset: number; rangeLength: number; text: string }[];
@@ -64,7 +74,7 @@ export function reconstructReplayFrames(baseline: ReplayFile[], events: ReplayEv
   const frames: ReplayFrame[] = [];
 
   for (const event of events) {
-    if (event.type === "workspace_state") {
+    if (event.type === "workspace_state" || event.type === "assignment_version_merge") {
       files = copyFiles(event.files);
     } else if (event.type === "file_change") {
       const fileIndex = files.findIndex(({ path }) => path === event.path);

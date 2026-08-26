@@ -18,6 +18,7 @@ type Release = {
   assignmentId: string;
   assignmentTitle: string;
   version: number;
+  latestVersion: number;
   points: number;
   publicationStatus: "draft" | "scheduled" | "published";
   scheduledFor?: number;
@@ -326,6 +327,7 @@ export default function AssignmentReleases({ classrooms }: { classrooms: Classro
                       </p>
                     </div>
                   ) : null}
+                  <VersionAdoption release={release} versions={versions ?? []} />
                 </li>
               ))}
             </ol>
@@ -334,6 +336,162 @@ export default function AssignmentReleases({ classrooms }: { classrooms: Classro
         </>
       )}
     </section>
+  );
+}
+
+type VersionPreview = {
+  version: number;
+  instructions: string;
+  runtimeVersion: string;
+  entrypoint: string;
+  evaluationTests: { name: string; visibility: "public" | "hidden"; weight: number }[];
+};
+type AdoptionPreview = {
+  fromVersion: VersionPreview;
+  toVersion: VersionPreview;
+  changedStarterFiles: {
+    path: string;
+    kind: "added" | "modified" | "removed";
+    previousContent?: string;
+    incomingContent?: string;
+  }[];
+};
+
+function VersionAdoption({ release, versions }: { release: Release; versions: VersionOption[] }) {
+  const newer = versions.filter(
+    (version) => version.assignmentId === release.assignmentId && version.version > release.version,
+  );
+  const [targetId, setTargetId] = useState("");
+  const preview = useQuery(
+    api.assignmentReleases.previewAdoption,
+    targetId ? { assignmentReleaseId: release._id, assignmentVersionId: targetId } : "skip",
+  ) as AdoptionPreview | undefined;
+  const adopt = useMutation(api.assignmentReleases.adoptVersion);
+  const [adopting, setAdopting] = useState(false);
+  const [error, setError] = useState<string>();
+
+  if (newer.length === 0) return null;
+  async function adoptPreviewed() {
+    if (!targetId || !preview) return;
+    setAdopting(true);
+    setError(undefined);
+    try {
+      await adopt({ assignmentReleaseId: release._id, assignmentVersionId: targetId });
+      setTargetId("");
+    } catch (caught) {
+      setError(messageFrom(caught));
+    } finally {
+      setAdopting(false);
+    }
+  }
+
+  return (
+    <details className="border-t border-foreground/10 pt-3">
+      <summary className="cursor-pointer text-sm font-medium">
+        Preview a newer Assignment Version
+      </summary>
+      <div className="mt-3 flex max-w-2xl flex-col gap-3">
+        <label className="flex flex-col gap-1 text-sm">
+          Newer version
+          <select
+            value={targetId}
+            onChange={(event) => setTargetId(event.target.value)}
+            className="border-input bg-background h-8 max-w-sm border px-2.5 text-xs"
+          >
+            <option value="">Choose a version to preview</option>
+            {newer.map((version) => (
+              <option value={version.assignmentVersionId} key={version.assignmentVersionId}>
+                Version {version.version} · Python {version.runtimeVersion}
+              </option>
+            ))}
+          </select>
+        </label>
+        {targetId && !preview ? (
+          <p className="text-sm text-muted-foreground">Loading preview…</p>
+        ) : null}
+        {preview ? (
+          <div className="border border-foreground/10 bg-muted/20 p-3 text-sm">
+            <p className="font-medium">
+              Version {preview.fromVersion.version} → Version {preview.toVersion.version}
+            </p>
+            <ul className="mt-2 grid gap-1 text-muted-foreground">
+              <li>
+                Instructions:{" "}
+                {preview.fromVersion.instructions === preview.toVersion.instructions
+                  ? "unchanged"
+                  : "changed"}
+              </li>
+              <li>
+                Runtime: {preview.fromVersion.runtimeVersion} → {preview.toVersion.runtimeVersion}
+              </li>
+              <li>
+                Entrypoint: {preview.fromVersion.entrypoint} → {preview.toVersion.entrypoint}
+              </li>
+              <li>
+                Evaluation Tests: {preview.fromVersion.evaluationTests.length} →{" "}
+                {preview.toVersion.evaluationTests.length}
+              </li>
+            </ul>
+            {preview.fromVersion.instructions !== preview.toVersion.instructions ? (
+              <details className="mt-3">
+                <summary className="cursor-pointer font-medium">Preview new instructions</summary>
+                <p className="mt-2 whitespace-pre-wrap border border-foreground/10 bg-background p-3 text-muted-foreground">
+                  {preview.toVersion.instructions}
+                </p>
+              </details>
+            ) : null}
+            <details className="mt-3">
+              <summary className="cursor-pointer font-medium">Preview new Evaluation Tests</summary>
+              <ul className="mt-2 grid gap-1 text-muted-foreground">
+                {preview.toVersion.evaluationTests.map((test, index) => (
+                  <li key={`${test.name}-${index}`}>
+                    {test.name} · {test.visibility} · {test.weight} points
+                  </li>
+                ))}
+              </ul>
+            </details>
+            {preview.changedStarterFiles.length ? (
+              <div className="mt-3">
+                <p className="font-medium">Starter files requiring each Student's decision</p>
+                <ul className="mt-1 text-muted-foreground">
+                  {preview.changedStarterFiles.map((file) => (
+                    <li key={file.path}>
+                      <details>
+                        <summary className="cursor-pointer">
+                          {file.path} · {file.kind}
+                        </summary>
+                        <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                          <pre className="overflow-x-auto border border-foreground/10 bg-background p-2 text-xs">
+                            {file.previousContent ?? "File did not exist"}
+                          </pre>
+                          <pre className="overflow-x-auto border border-foreground/10 bg-background p-2 text-xs">
+                            {file.incomingContent ?? "File will be removed"}
+                          </pre>
+                        </div>
+                      </details>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : (
+              <p className="mt-3 text-muted-foreground">
+                Starter files are unchanged; existing Workspaces can move without file replacement.
+              </p>
+            )}
+            <Button
+              type="button"
+              size="sm"
+              className="mt-3"
+              disabled={adopting}
+              onClick={() => void adoptPreviewed()}
+            >
+              {adopting ? "Adopting…" : `Adopt Version ${preview.toVersion.version}`}
+            </Button>
+          </div>
+        ) : null}
+        {error ? <p className="text-sm text-destructive">{error}</p> : null}
+      </div>
+    </details>
   );
 }
 

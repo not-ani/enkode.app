@@ -1,5 +1,41 @@
 export type WorkspaceFile = { path: string; content: string };
 
+export type StarterFileMerge = {
+  path: string;
+  kind: "added" | "modified" | "removed";
+  previousContent?: string;
+  incomingContent?: string;
+  currentContent?: string;
+};
+
+export type StarterFileDecision = {
+  path: string;
+  choice: "keep_current" | "accept_new";
+};
+
+export function applyStarterFileDecisions(
+  files: WorkspaceFile[],
+  changes: StarterFileMerge[],
+  decisions: StarterFileDecision[],
+) {
+  const choices = new Map(decisions.map((decision) => [decision.path, decision.choice]));
+  if (
+    choices.size !== decisions.length ||
+    decisions.length !== changes.length ||
+    changes.some(({ path }) => !choices.has(path))
+  ) {
+    throw new Error("Choose how to handle every changed starter file");
+  }
+  const next = new Map(files.map((file) => [file.path, file.content]));
+  for (const change of changes) {
+    if (choices.get(change.path) !== "accept_new") continue;
+    if (change.incomingContent === undefined) next.delete(change.path);
+    else next.set(change.path, change.incomingContent);
+  }
+  if (next.size === 0) throw new Error("A Workspace needs at least one file");
+  return [...next].map(([path, content]) => ({ path, content }));
+}
+
 export type WorkspaceState = {
   activePath: string;
   files: WorkspaceFile[];
