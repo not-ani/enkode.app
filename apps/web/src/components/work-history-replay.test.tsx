@@ -76,4 +76,42 @@ describe("Work History replay", () => {
     expect(loadPage).toHaveBeenCalledTimes(2);
     expect(screen.queryByRole("button", { name: "Load from sequence 3" })).toBeNull();
   });
+
+  it("labels Run and Submission events without changing the replayed files", async () => {
+    render(
+      <WorkHistoryReplay
+        committedThrough={3}
+        loadPage={async () => ({
+          baselineFiles: [{ path: "main.py", content: "print('hello')\n" }],
+          events: [
+            {
+              sequence: 2,
+              type: "run",
+              runId: "run-1",
+              status: "completed",
+              stdout: "hello\n",
+              stderr: "",
+              exitCode: 0,
+              publicTests: [],
+              observedAt: 2,
+            },
+            {
+              sequence: 3,
+              type: "submission",
+              submissionId: "submission-1",
+              attemptNumber: 1,
+              proposedPoints: 10,
+              observedAt: 3,
+            },
+          ],
+        })}
+      />,
+    );
+
+    await screen.findByText("Run: completed");
+    expect(screen.getByText("print('hello')", { exact: false })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    expect(screen.getByText("Submitted attempt 1")).toBeTruthy();
+    expect(screen.getByText("print('hello')", { exact: false })).toBeTruthy();
+  });
 });

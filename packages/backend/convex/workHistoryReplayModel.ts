@@ -14,6 +14,31 @@ export type ReplayEvent =
       changes: { rangeOffset: number; rangeLength: number; text: string }[];
       origin: string;
       observedAt: number;
+    }
+  | {
+      sequence: number;
+      type: "run";
+      runId: string;
+      status: "completed" | "failed" | "timed_out";
+      stdout: string;
+      stderr: string;
+      exitCode: number | null;
+      publicTests: {
+        name: string;
+        passed: boolean;
+        stdout: string;
+        stderr: string;
+        exitCode: number | null;
+      }[];
+      observedAt: number;
+    }
+  | {
+      sequence: number;
+      type: "submission";
+      submissionId: string;
+      attemptNumber: number;
+      proposedPoints: number;
+      observedAt: number;
     };
 
 export type ReplayFrame = {
@@ -41,7 +66,7 @@ export function reconstructReplayFrames(baseline: ReplayFile[], events: ReplayEv
   for (const event of events) {
     if (event.type === "workspace_state") {
       files = copyFiles(event.files);
-    } else {
+    } else if (event.type === "file_change") {
       const fileIndex = files.findIndex(({ path }) => path === event.path);
       if (fileIndex === -1) throw new Error(`Work History references unknown file ${event.path}`);
       let content = files[fileIndex]!.content;

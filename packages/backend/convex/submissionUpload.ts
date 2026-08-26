@@ -9,6 +9,7 @@ import { action } from "./_generated/server";
 import { executionServiceFromEnvironment } from "./execution";
 import { objectStorageFromEnvironment } from "./objectStorage";
 import { evaluateSubmission } from "./submissionEvaluation";
+import { decodeSnapshotPayload } from "./workHistoryProtocol";
 
 const workspaceFile = v.object({ path: v.string(), content: v.string() });
 
@@ -22,6 +23,26 @@ export const submit = action({
   handler: async (ctx, input): Promise<Record<string, unknown>> => {
     const prepared = await ctx.runQuery(internal.submissions.prepare, input);
     if ("existing" in prepared) return prepared.existing;
+    const storage = objectStorageFromEnvironment();
+    const historySnapshotBytes = await storage.getImmutable({
+      key: prepared.historySnapshot.objectKey,
+      sha256: prepared.historySnapshot.contentHash,
+      byteLength: prepared.historySnapshot.byteLength,
+    });
+    const finalizedFiles = decodeSnapshotPayload(
+      prepared.historySnapshot.manifest,
+      historySnapshotBytes,
+    ).files;
+    if (
+      finalizedFiles.length !== prepared.files.length ||
+      finalizedFiles.some(
+        (file, index) =>
+          file.path !== prepared.files[index]?.path ||
+          file.content !== prepared.files[index]?.content,
+      )
+    ) {
+      throw new Error("Finalized Work History does not match the submitted Workspace");
+    }
     const snapshotPayload = gzipSync(
       JSON.stringify({
         version: 1,
@@ -33,7 +54,7 @@ export const submit = action({
     );
     const contentHash = createHash("sha256").update(snapshotPayload).digest("hex");
     const objectKey = `organizations/${prepared.organizationId}/workspaces/${input.workspaceId}/submissions/${contentHash}.json.gz`;
-    await objectStorageFromEnvironment().putImmutable({
+    await storage.putImmutable({
       key: objectKey,
       bytes: snapshotPayload,
       contentType: "application/gzip",

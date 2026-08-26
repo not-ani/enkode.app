@@ -1,3 +1,6 @@
+import { createHash } from "node:crypto";
+import { gzipSync } from "node:zlib";
+
 import { convexTest } from "convex-test";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -117,6 +120,15 @@ describe("immutable Submission attempts", () => {
   it("creates one attempt when an explicit Submit action is retried", async () => {
     const backend = convexTest(schema, modules);
     const seeded = await seed(backend);
+    const historySnapshot = gzipSync(
+      JSON.stringify({
+        version: 1,
+        workspaceId: seeded.workspaceId,
+        sequence: 1,
+        files: seeded.files,
+      }),
+    );
+    const historySnapshotHash = createHash("sha256").update(historySnapshot).digest("hex");
     await backend.mutation(internal.workHistory.commitChunk, {
       workspaceId: seeded.workspaceId,
       organizationId: seeded.organizationId,
@@ -127,9 +139,9 @@ describe("immutable Submission attempts", () => {
       contentHash: "history-hash",
       objectKey: "history/1.gz",
       byteLength: 1,
-      snapshotHash: "snapshot-hash",
+      snapshotHash: historySnapshotHash,
       snapshotObjectKey: "snapshots/1.gz",
-      snapshotByteLength: 1,
+      snapshotByteLength: historySnapshot.byteLength,
     });
     const requests: { url: string; contentType: string }[] = [];
     vi.stubGlobal(
@@ -137,6 +149,7 @@ describe("immutable Submission attempts", () => {
       vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
         const headers = new Headers(init?.headers);
         requests.push({ url: String(input), contentType: headers.get("content-type") ?? "" });
+        if ((init?.method ?? "GET") === "GET") return new Response(historySnapshot);
         if (headers.get("content-type") === "application/gzip") return new Response(null);
         return new Response(
           JSON.stringify({ run: { stdout: "wrong", stderr: "", code: 0, signal: null } }),
@@ -166,6 +179,54 @@ describe("immutable Submission attempts", () => {
     );
     expect(requests.filter(({ url }) => url.includes("/api/v2/execute"))).toHaveLength(2);
     expect(await backend.run(async (ctx) => ctx.db.query("submissions").collect())).toHaveLength(1);
+  });
+
+  it("rejects files that do not match the acknowledged Work History snapshot", async () => {
+    const backend = convexTest(schema, modules);
+    const seeded = await seed(backend);
+    const historySnapshot = gzipSync(
+      JSON.stringify({
+        version: 1,
+        workspaceId: seeded.workspaceId,
+        sequence: 1,
+        files: [{ path: "main.py", content: "different history" }],
+      }),
+    );
+    const historySnapshotHash = createHash("sha256").update(historySnapshot).digest("hex");
+    await backend.mutation(internal.workHistory.commitChunk, {
+      workspaceId: seeded.workspaceId,
+      organizationId: seeded.organizationId,
+      studentId: seeded.studentId,
+      startSequence: 1,
+      endSequence: 1,
+      eventCount: 1,
+      contentHash: "history-hash",
+      objectKey: "history/1.gz",
+      byteLength: 1,
+      snapshotHash: historySnapshotHash,
+      snapshotObjectKey: "snapshots/1.gz",
+      snapshotByteLength: historySnapshot.byteLength,
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(historySnapshot)),
+    );
+    process.env.ENKODE_EXECUTION_ENDPOINT = "https://execute.example.test";
+    process.env.ENKODE_OBJECT_STORAGE_ENDPOINT = "https://objects.example.test";
+    process.env.ENKODE_OBJECT_STORAGE_BUCKET = "enkode";
+    process.env.ENKODE_OBJECT_STORAGE_REGION = "auto";
+    process.env.ENKODE_OBJECT_STORAGE_ACCESS_KEY_ID = "access";
+    process.env.ENKODE_OBJECT_STORAGE_SECRET_ACCESS_KEY = "secret";
+
+    await expect(
+      backend.withIdentity({ subject: "auth-student" }).action(api.submissionUpload.submit, {
+        workspaceId: seeded.workspaceId,
+        files: seeded.files,
+        requiredHistorySequence: 1,
+        idempotencyKey: "mismatched-history",
+      }),
+    ).rejects.toThrow("Finalized Work History does not match");
+    expect(await backend.run(async (ctx) => ctx.db.query("submissions").collect())).toEqual([]);
   });
 
   it("requires acknowledged history, keeps snapshots immutable, redacts hidden data, and retries idempotently", async () => {

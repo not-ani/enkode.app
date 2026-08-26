@@ -26,6 +26,15 @@ const originLabels: Record<string, string> = {
   unattributed: "No observed Edit Origin",
 };
 
+function eventLabel(event: ReplayEvent) {
+  if (event.type === "workspace_state") return "Workspace state";
+  if (event.type === "file_change") {
+    return `Edit Origin: ${originLabels[event.origin] ?? event.origin}`;
+  }
+  if (event.type === "run") return `Run: ${event.status}`;
+  return `Submitted attempt ${event.attemptNumber}`;
+}
+
 export default function WorkHistoryReplay({
   committedThrough,
   loadPage,
@@ -88,8 +97,6 @@ export default function WorkHistoryReplay({
     ? activePath!
     : frame.files[0]!.path;
   const activeFile = frame.files.find(({ path }) => path === selectedPath)!;
-  const origin = frame.event.type === "file_change" ? frame.event.origin : undefined;
-
   return (
     <section className="flex flex-col gap-4">
       <div className="grid gap-3 border-y border-foreground/10 py-4">
@@ -98,11 +105,7 @@ export default function WorkHistoryReplay({
             <p className="font-medium tabular-nums">
               Sequence {frame.sequence} of {committedThrough}
             </p>
-            <p className="text-sm text-muted-foreground">
-              {frame.event.type === "workspace_state"
-                ? "Workspace state"
-                : `Edit Origin: ${originLabels[origin!] ?? origin}`}
-            </p>
+            <p className="text-sm text-muted-foreground">{eventLabel(frame.event)}</p>
           </div>
           <div className="flex gap-2">
             <Button

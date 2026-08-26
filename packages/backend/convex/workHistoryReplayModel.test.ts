@@ -67,4 +67,32 @@ describe("Work History replay reconstruction", () => {
       files: [{ path: "main.py", content: "two\n" }],
     });
   });
+
+  it("retains exact files while replaying Run and Submission events", () => {
+    const baseline = [{ path: "main.py", content: "print('hello')\n" }];
+    const frames = reconstructReplayFrames(baseline, [
+      {
+        sequence: 2,
+        type: "run",
+        runId: "run-1",
+        status: "completed",
+        stdout: "hello\n",
+        stderr: "",
+        exitCode: 0,
+        publicTests: [],
+        observedAt: 2,
+      },
+      {
+        sequence: 3,
+        type: "submission",
+        submissionId: "submission-1",
+        attemptNumber: 1,
+        proposedPoints: 10,
+        observedAt: 3,
+      },
+    ]);
+
+    expect(frames.map(({ files }) => files)).toEqual([baseline, baseline]);
+    expect(frames.map(({ event }) => event.type)).toEqual(["run", "submission"]);
+  });
 });

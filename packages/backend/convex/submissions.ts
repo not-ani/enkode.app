@@ -124,6 +124,12 @@ export const prepare = internalQuery({
       entrypoint: version.entrypoint,
       files: input.files,
       requiredHistorySequence: input.requiredHistorySequence,
+      historySnapshot: {
+        objectKey: historyChunk.snapshotObjectKey,
+        contentHash: historyChunk.snapshotHash,
+        byteLength: historyChunk.snapshotByteLength,
+        manifest: historyChunk,
+      },
       idempotencyKey: input.idempotencyKey,
       tests,
     };
