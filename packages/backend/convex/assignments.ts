@@ -22,6 +22,7 @@ const evaluationTest = v.object({
     v.literal("python_harness"),
     v.literal("javascript_harness"),
     v.literal("typescript_harness"),
+    v.literal("java_harness"),
   ),
   visibility: v.union(v.literal("public"), v.literal("hidden")),
   weight: v.number(),
@@ -33,7 +34,12 @@ const evaluationTest = v.object({
 });
 const versionFields = {
   language: v.optional(
-    v.union(v.literal("python"), v.literal("javascript"), v.literal("typescript")),
+    v.union(
+      v.literal("python"),
+      v.literal("javascript"),
+      v.literal("typescript"),
+      v.literal("java"),
+    ),
   ),
   instructions: v.string(),
   runtimeVersion: v.string(),
@@ -50,7 +56,12 @@ type VersionInput = {
   starterFiles: { path: string; content: string }[];
   evaluationTests: {
     name: string;
-    kind: "input_output" | "python_harness" | "javascript_harness" | "typescript_harness";
+    kind:
+      | "input_output"
+      | "python_harness"
+      | "javascript_harness"
+      | "typescript_harness"
+      | "java_harness";
     visibility: "public" | "hidden";
     weight: number;
     stdin?: string;
@@ -83,7 +94,9 @@ function validateVersion(input: VersionInput) {
   if (new Set(paths).size !== paths.length)
     throw new ConvexError("Starter file paths must be unique");
   if (!paths.includes(entrypoint)) throw new ConvexError("The entrypoint must be a starter file");
-  const extension = { python: ".py", javascript: ".js", typescript: ".ts" }[language];
+  const extension = { python: ".py", javascript: ".js", typescript: ".ts", java: ".java" }[
+    language
+  ];
   if (!entrypoint.endsWith(extension)) {
     throw new ConvexError(`The ${language} entrypoint must end in ${extension}`);
   }

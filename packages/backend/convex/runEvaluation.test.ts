@@ -39,6 +39,7 @@ describe("public Run evaluation", () => {
 
     await expect(
       evaluateRun(execution, {
+        language: "python",
         runtimeVersion: "3.12.0",
         entrypoint: "main.py",
         files,
@@ -67,6 +68,7 @@ describe("public Run evaluation", () => {
   it("runs a platform-owned Python harness without exposing arbitrary commands", async () => {
     const execution = new FakeExecutionService([completed(), completed()]);
     await evaluateRun(execution, {
+      language: "python",
       runtimeVersion: "3.12.0",
       entrypoint: "main.py",
       files: [{ path: "main.py", content: "answer = 42\n" }],
@@ -95,6 +97,7 @@ describe("public Run evaluation", () => {
   it("defensively ignores hidden Evaluation Tests at the Run boundary", async () => {
     const execution = new FakeExecutionService([completed()]);
     const result = await evaluateRun(execution, {
+      language: "python",
       runtimeVersion: "3.12.0",
       entrypoint: "main.py",
       files: [{ path: "main.py", content: "print('hello')\n" }],
@@ -103,5 +106,42 @@ describe("public Run evaluation", () => {
 
     expect(execution.requests).toHaveLength(1);
     expect(result.publicTestResults).toEqual([]);
+  });
+
+  it("executes Java and its platform-owned harness with the exact runtime", async () => {
+    const execution = new FakeExecutionService([completed("hello\n"), completed()]);
+    const javaHarness = test({
+      kind: "java_harness",
+      harness: "    Main.greet();",
+      stdin: undefined,
+      expectedOutput: undefined,
+    });
+
+    await evaluateRun(execution, {
+      language: "java",
+      runtimeVersion: "15.0.2",
+      entrypoint: "Main.java",
+      files: [{ path: "Main.java", content: "public class Main {}" }],
+      publicTests: [javaHarness],
+    });
+
+    expect(execution.requests).toEqual([
+      expect.objectContaining({
+        runtime: { language: "java", version: "15.0.2" },
+        entrypoint: "Main.java",
+      }),
+      expect.objectContaining({
+        runtime: { language: "java", version: "15.0.2" },
+        entrypoint: "__enkode_public_test_0.java",
+        files: [
+          {
+            path: "__enkode_public_test_0.java",
+            content:
+              "public class __enkode_public_test_0 {\n  public static void main(String[] args) throws Exception {\n    Main.greet();\n  }\n}\n",
+          },
+          { path: "Main.java", content: "public class Main {}" },
+        ],
+      }),
+    ]);
   });
 });

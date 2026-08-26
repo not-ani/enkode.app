@@ -11,12 +11,14 @@ type VersionOption = {
   assignmentTitle: string;
   assignmentVersionId: string;
   version: number;
-  language: "python" | "javascript" | "typescript";
+  language: "python" | "javascript" | "typescript" | "java";
   runtimeVersion: string;
 };
 
 function languageName(language: VersionOption["language"]) {
-  return { python: "Python", javascript: "JavaScript", typescript: "TypeScript" }[language];
+  return { python: "Python", javascript: "JavaScript", typescript: "TypeScript", java: "Java" }[
+    language
+  ];
 }
 type Release = {
   _id: string;

@@ -31,6 +31,7 @@ import {
   type LanguageIntelligenceState,
   RemotePythonLanguageService,
 } from "@/lib/python-language-service";
+import { RemoteJavaLanguageService } from "@/lib/java-language-service";
 import {
   createLocalWorkspaceDraftStore,
   createWorkspaceState,
@@ -158,7 +159,12 @@ export default function WorkspaceEditor({
             env.VITE_PYRIGHT_LANGUAGE_SERVICE_URL,
             new WebSocketLanguageServiceTransport(),
           ) as unknown as WorkspaceLanguageService)
-        : new BrowserLocalLanguageService(language),
+        : language === "java"
+          ? (new RemoteJavaLanguageService(
+              env.VITE_JDTLS_LANGUAGE_SERVICE_URL,
+              new WebSocketLanguageServiceTransport(),
+            ) as unknown as WorkspaceLanguageService)
+          : new BrowserLocalLanguageService(language),
     [language],
   );
   const [intelligenceState, setIntelligenceState] = useState<LanguageIntelligenceState>(() =>
@@ -450,6 +456,7 @@ export default function WorkspaceEditor({
             <p className="truncate font-mono text-sm">{activeFile.path}</p>
             <div className="flex items-center gap-3">
               <LanguageIntelligenceStatus
+                language={language}
                 state={intelligenceState}
                 reconnect={() => void languageService.reconnect()}
               />
@@ -724,17 +731,25 @@ function RunResults({ result }: { result: RunResult }) {
 }
 
 function LanguageIntelligenceStatus({
+  language,
   state,
   reconnect,
 }: {
+  language: WorkspaceLanguage;
   state: LanguageIntelligenceState;
   reconnect: () => void;
 }) {
+  const languageName = {
+    python: "Python",
+    javascript: "JavaScript",
+    typescript: "TypeScript",
+    java: "Java",
+  }[language];
   const label = {
     disconnected: "Intelligence disconnected",
     connecting: "Intelligence connecting…",
-    ready: "Python intelligence ready",
-    failed: "Python intelligence unavailable",
+    ready: `${languageName} intelligence ready`,
+    failed: `${languageName} intelligence unavailable`,
   }[state.status];
   return (
     <div className="flex items-center gap-2">

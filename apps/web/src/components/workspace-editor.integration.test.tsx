@@ -28,7 +28,10 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@enkode.app/env/web", () => ({
-  env: { VITE_PYRIGHT_LANGUAGE_SERVICE_URL: "wss://languages.example.test/python" },
+  env: {
+    VITE_PYRIGHT_LANGUAGE_SERVICE_URL: "wss://languages.example.test/python",
+    VITE_JDTLS_LANGUAGE_SERVICE_URL: "wss://languages.example.test/java",
+  },
 }));
 
 vi.mock("./workspace-monaco", () => ({
@@ -40,6 +43,17 @@ vi.mock("./workspace-monaco", () => ({
 
 vi.mock("@/lib/python-language-service", () => ({
   RemotePythonLanguageService: class {
+    connect = mocks.connect;
+    disconnect = mocks.disconnect;
+    updateFile = mocks.languageUpdate;
+    reconnect = vi.fn(async () => undefined);
+    getState = () => ({ status: "ready" });
+    subscribeState = () => () => undefined;
+  },
+}));
+
+vi.mock("@/lib/java-language-service", () => ({
+  RemoteJavaLanguageService: class {
     connect = mocks.connect;
     disconnect = mocks.disconnect;
     updateFile = mocks.languageUpdate;
@@ -176,6 +190,39 @@ describe("Workspace editor integration", () => {
       attemptNumber: 1,
       proposedPoints: 1,
     });
+  });
+
+  it("uses the shared editor lifecycle for Java while retaining exact runtime context", async () => {
+    render(
+      <WorkspaceEditor
+        assignmentReleaseId="release-java"
+        workspaceId="workspace-java"
+        files={[{ path: "Main.java", content: "public class Main {}\n" }]}
+        language="java"
+        entrypoint="Main.java"
+        runtimeVersion="15.0.2"
+        onSave={vi.fn(async () => undefined)}
+        onUploadHistory={vi.fn(async () => ({ acknowledgedThrough: 1 }))}
+        onRun={vi.fn()}
+        submissions={[]}
+        onSubmit={vi.fn()}
+        onCompleteVersionMerge={vi.fn(async () => undefined)}
+      />,
+    );
+
+    await waitFor(() => expect(mocks.monacoProps).toBeDefined());
+    expect(screen.getByText("Java intelligence ready")).toBeDefined();
+    expect(mocks.connect).toHaveBeenCalledWith({
+      workspaceId: "workspace-java",
+      runtime: { language: "java", version: "15.0.2" },
+      files: [{ path: "Main.java", content: "public class Main {}\n" }],
+    });
+
+    await act(() => mocks.monacoProps!.onChange("public class Main { int answer = 42; }\n"));
+    expect(mocks.languageUpdate).toHaveBeenCalledWith(
+      "Main.java",
+      "public class Main { int answer = 42; }\n",
+    );
   });
 
   it("requires acknowledgement and records accepted starter changes before completing a merge", async () => {

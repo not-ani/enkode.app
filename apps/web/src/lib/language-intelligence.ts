@@ -1,9 +1,13 @@
 import type * as Monaco from "monaco-editor/editor/editor.api";
 
-import type { LanguageIntelligenceState, PythonLanguageService } from "./python-language-service";
-import { registerPythonMonacoAdapter } from "./python-monaco-adapter";
+import type {
+  LanguageIntelligenceState,
+  RemoteLanguage,
+  RemoteLanguageServiceContract,
+} from "./remote-language-service";
+import { registerRemoteMonacoAdapter } from "./remote-monaco-adapter";
 
-export type WorkspaceLanguage = "python" | "javascript" | "typescript";
+export type WorkspaceLanguage = "python" | "javascript" | "typescript" | "java";
 
 export type WorkspaceLanguageService = {
   getState: () => LanguageIntelligenceState;
@@ -61,11 +65,12 @@ export function registerEnkodeMonacoLanguageAdapter(
     workspaceId: string;
   },
 ) {
-  if (input.language === "python") {
-    return registerPythonMonacoAdapter(
+  if (input.language === "python" || input.language === "java") {
+    return registerRemoteMonacoAdapter(
       monaco,
-      input.service as unknown as PythonLanguageService,
+      input.service as unknown as RemoteLanguageServiceContract<RemoteLanguage>,
       input.workspaceId,
+      input.language,
     );
   }
 
@@ -87,5 +92,7 @@ export function registerEnkodeMonacoLanguageAdapter(
 }
 
 export function languageLabel(language: WorkspaceLanguage) {
-  return { python: "Python", javascript: "JavaScript", typescript: "TypeScript" }[language];
+  return { python: "Python", javascript: "JavaScript", typescript: "TypeScript", java: "Java" }[
+    language
+  ];
 }

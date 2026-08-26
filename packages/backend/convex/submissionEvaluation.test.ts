@@ -37,6 +37,7 @@ describe("Submission evaluation", () => {
       completed("wrong"),
     ]);
     const result = await evaluateSubmission(execution, {
+      language: "python",
       runtimeVersion: "3.12.0",
       entrypoint: "main.py",
       files: [{ path: "main.py", content: "print('answer')" }],
@@ -65,5 +66,46 @@ describe("Submission evaluation", () => {
       }),
     ]);
     expect(execution.requests[2]?.stdin).toBe("secret input");
+  });
+
+  it("preserves the public and hidden boundary for Java native tests", async () => {
+    const execution = new FakeExecutionService([completed(), completed(), completed()]);
+    const result = await evaluateSubmission(execution, {
+      language: "java",
+      runtimeVersion: "15.0.2",
+      entrypoint: "Main.java",
+      files: [{ path: "Main.java", content: "public class Main {}" }],
+      tests: [
+        test({
+          kind: "java_harness",
+          harness: "    Main.main(new String[0]);",
+          stdin: undefined,
+          expectedOutput: undefined,
+        }),
+        test({
+          _id: "hidden-java" as Id<"evaluationTests">,
+          kind: "java_harness",
+          visibility: "hidden",
+          harness: "    new Main();",
+          stdin: undefined,
+          expectedOutput: undefined,
+          order: 1,
+          weight: 3,
+          passGuidance: "The edge case passed.",
+        }),
+      ],
+    });
+
+    expect(result.proposedPoints).toBe(5);
+    expect(result.testResults).toEqual([
+      expect.objectContaining({ visibility: "public", passed: true }),
+      expect.objectContaining({
+        visibility: "hidden",
+        passed: true,
+        guidance: "The edge case passed.",
+      }),
+    ]);
+    expect(execution.requests.every(({ runtime }) => runtime.language === "java")).toBe(true);
+    expect(execution.requests.every(({ runtime }) => runtime.version === "15.0.2")).toBe(true);
   });
 });

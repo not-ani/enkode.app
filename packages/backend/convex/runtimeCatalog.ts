@@ -15,6 +15,10 @@ export const maintainedRuntimes = [
     language: "typescript" as const,
     version: "5.0.3",
   },
+  {
+    language: "java" as const,
+    version: "15.0.2",
+  },
 ] as const;
 
 export type AssignmentLanguage = (typeof maintainedRuntimes)[number]["language"];
@@ -23,6 +27,7 @@ export type MaintainedRuntime = (typeof maintainedRuntimes)[number];
 export const maintainedPythonRuntime = maintainedRuntimes[0];
 export const maintainedJavaScriptRuntime = maintainedRuntimes[1];
 export const maintainedTypeScriptRuntime = maintainedRuntimes[2];
+export const maintainedJavaRuntime = maintainedRuntimes[3];
 
 export function requireMaintainedRuntime(language: AssignmentLanguage, version: string) {
   const runtime = maintainedRuntimes.find(
@@ -39,6 +44,7 @@ function languageLabel(language: AssignmentLanguage) {
     python: "Python",
     javascript: "JavaScript",
     typescript: "TypeScript",
+    java: "Java",
   }[language];
 }
 

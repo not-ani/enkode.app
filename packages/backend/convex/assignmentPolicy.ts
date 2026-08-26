@@ -2,7 +2,12 @@ import { ConvexError } from "convex/values";
 
 type EvaluationTest = {
   name: string;
-  kind: "input_output" | "python_harness" | "javascript_harness" | "typescript_harness";
+  kind:
+    | "input_output"
+    | "python_harness"
+    | "javascript_harness"
+    | "typescript_harness"
+    | "java_harness";
   visibility: "public" | "hidden";
   weight: number;
   stdin?: string;
@@ -27,7 +32,7 @@ export function validateFilePath(path: string) {
 
 export function validateEvaluationTest(
   test: EvaluationTest,
-  language: "python" | "javascript" | "typescript",
+  language: "python" | "javascript" | "typescript" | "java",
 ) {
   if (!test.name.trim()) throw new ConvexError("Evaluation Test name is required");
   if (!Number.isFinite(test.weight) || test.weight < 0) {

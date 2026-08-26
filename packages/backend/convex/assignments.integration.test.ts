@@ -5,6 +5,7 @@ import { api } from "./_generated/api";
 import { studentVisibleEvaluationTest } from "./assignmentPolicy";
 import {
   maintainedJavaScriptRuntime,
+  maintainedJavaRuntime,
   maintainedPythonRuntime,
   maintainedRuntimes,
   maintainedTypeScriptRuntime,
@@ -257,6 +258,11 @@ describe.each([
     runtime: maintainedTypeScriptRuntime,
     entrypoint: "main.ts",
     kind: "typescript_harness" as const,
+  },
+  {
+    runtime: maintainedJavaRuntime,
+    entrypoint: "Main.java",
+    kind: "java_harness" as const,
   },
 ])("immutable $runtime.language Assignment Versions", ({ runtime, entrypoint, kind }) => {
   it("authors pinned starter files and supported tests and retains the referenced runtime", async () => {

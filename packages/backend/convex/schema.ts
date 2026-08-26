@@ -6,12 +6,14 @@ const assignmentLanguage = v.union(
   v.literal("python"),
   v.literal("javascript"),
   v.literal("typescript"),
+  v.literal("java"),
 );
 const testKind = v.union(
   v.literal("input_output"),
   v.literal("python_harness"),
   v.literal("javascript_harness"),
   v.literal("typescript_harness"),
+  v.literal("java_harness"),
 );
 const testVisibility = v.union(v.literal("public"), v.literal("hidden"));
 const releasePublicationState = v.union(
@@ -346,6 +348,7 @@ export default defineSchema({
     assignmentReleaseId: v.id("assignmentReleases"),
     assignmentVersionId: v.id("assignmentVersions"),
     studentId: v.id("users"),
+    language: v.optional(assignmentLanguage),
     runtimeVersion: v.string(),
     entrypoint: v.string(),
     files: v.array(v.object({ path: v.string(), content: v.string() })),
@@ -392,6 +395,7 @@ export default defineSchema({
     snapshotId: v.id("submissionSnapshots"),
     idempotencyKey: v.string(),
     attemptNumber: v.number(),
+    language: v.optional(assignmentLanguage),
     runtimeVersion: v.string(),
     entrypoint: v.string(),
     execution: v.object({

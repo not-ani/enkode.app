@@ -96,6 +96,14 @@ export const record = internalMutation({
     studentId: v.id("users"),
     assignmentReleaseId: v.id("assignmentReleases"),
     assignmentVersionId: v.id("assignmentVersions"),
+    language: v.optional(
+      v.union(
+        v.literal("python"),
+        v.literal("javascript"),
+        v.literal("typescript"),
+        v.literal("java"),
+      ),
+    ),
     runtimeVersion: v.string(),
     entrypoint: v.string(),
     files: v.array(workspaceFile),
@@ -118,7 +126,7 @@ export const run = action({
   handler: async (ctx, input) => {
     const prepared = await ctx.runQuery(internal.runs.prepare, input);
     const result = await evaluateRun(executionServiceFromEnvironment(), prepared);
-    const { language: _language, publicTests: _publicTests, ...record } = prepared;
+    const { publicTests: _publicTests, ...record } = prepared;
     const runId = await ctx.runMutation(internal.runs.record, {
       workspaceId: input.workspaceId,
       ...record,

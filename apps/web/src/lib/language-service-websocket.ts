@@ -1,7 +1,7 @@
 import type {
   LanguageServiceConnection,
   LanguageServiceTransport,
-} from "./python-language-service";
+} from "./remote-language-service";
 
 type JsonMessage =
   | { id: number; result?: unknown; error?: { message?: string } }
@@ -14,7 +14,7 @@ export class WebSocketLanguageServiceTransport implements LanguageServiceTranspo
       socket.addEventListener("open", () => resolve(), { once: true });
       socket.addEventListener(
         "error",
-        () => reject(new Error("Could not connect to Python intelligence")),
+        () => reject(new Error("Could not connect to language intelligence")),
         {
           once: true,
         },
@@ -55,7 +55,7 @@ function createConnection(socket: WebSocket): LanguageServiceConnection {
 
   socket.addEventListener("close", (event) => {
     if (disposed) return;
-    const reason = event.reason || "Python intelligence disconnected";
+    const reason = event.reason || "Language intelligence disconnected";
     for (const request of pending.values()) request.reject(new Error(reason));
     pending.clear();
     for (const listener of closeListeners) listener(reason);
@@ -64,7 +64,7 @@ function createConnection(socket: WebSocket): LanguageServiceConnection {
   return {
     request<Result>(method: string, params: unknown) {
       if (socket.readyState !== WebSocket.OPEN) {
-        return Promise.reject(new Error("Python intelligence disconnected"));
+        return Promise.reject(new Error("Language intelligence disconnected"));
       }
       const id = nextId++;
       socket.send(JSON.stringify({ id, method, params }));
@@ -77,7 +77,7 @@ function createConnection(socket: WebSocket): LanguageServiceConnection {
     },
     async notify(method, params) {
       if (socket.readyState !== WebSocket.OPEN) {
-        throw new Error("Python intelligence disconnected");
+        throw new Error("Language intelligence disconnected");
       }
       socket.send(JSON.stringify({ method, params }));
     },

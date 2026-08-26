@@ -8,8 +8,13 @@ import { useState, type FormEvent } from "react";
 import ArchiveActions from "./archive-actions";
 
 type AssignmentSummary = { _id: string; title: string; latestVersion: number };
-type Language = "python" | "javascript" | "typescript";
-type TestKind = "input_output" | "python_harness" | "javascript_harness" | "typescript_harness";
+type Language = "python" | "javascript" | "typescript" | "java";
+type TestKind =
+  | "input_output"
+  | "python_harness"
+  | "javascript_harness"
+  | "typescript_harness"
+  | "java_harness";
 type Runtime = { language: Language; version: string };
 type Visibility = "public" | "hidden";
 type StarterFile = { id: string; path: string; content: string };
@@ -56,6 +61,7 @@ function languageDefaults(language: Language) {
     python: { entrypoint: "main.py", files: ["main.py", "helpers.py"] },
     javascript: { entrypoint: "main.js", files: ["main.js", "helpers.js"] },
     typescript: { entrypoint: "main.ts", files: ["main.ts", "helpers.ts"] },
+    java: { entrypoint: "Main.java", files: ["Main.java", "Helpers.java"] },
   }[language];
 }
 
@@ -64,7 +70,9 @@ function harnessKind(language: Language): Exclude<TestKind, "input_output"> {
 }
 
 function languageName(language: Language) {
-  return { python: "Python", javascript: "JavaScript", typescript: "TypeScript" }[language];
+  return { python: "Python", javascript: "JavaScript", typescript: "TypeScript", java: "Java" }[
+    language
+  ];
 }
 
 function initialDraft(language: Language = "python") {
@@ -151,7 +159,7 @@ export default function AssignmentAuthoring({ courseId }: { courseId: string }) 
         <div>
           <p className="font-medium text-base sm:text-sm">Assignments</p>
           <p className="text-muted-foreground text-base sm:text-sm">
-            Immutable Python, JavaScript, and TypeScript content for this Course.
+            Immutable Python, JavaScript, TypeScript, and Java content for this Course.
           </p>
         </div>
         {authoring ? (

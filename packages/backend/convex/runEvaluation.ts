@@ -67,15 +67,19 @@ export async function evaluateTest(
     result = await request(input.entrypoint, input.files, test.stdin);
     passed = result.status === "completed" && result.stdout === test.expectedOutput;
   } else {
-    const extension = { python: "py", javascript: "js", typescript: "ts" }[
+    const extension = { python: "py", javascript: "js", typescript: "ts", java: "java" }[
       input.language ?? "python"
     ];
-    let harnessPath = `__enkode_${test.visibility}_test_${test.order}.${extension}`;
-    while (input.files.some(({ path }) => path === harnessPath)) harnessPath = `_${harnessPath}`;
-    result = await request(harnessPath, [
-      { path: harnessPath, content: test.harness! },
-      ...input.files,
-    ]);
+    let harnessName = `__enkode_${test.visibility}_test_${test.order}`;
+    while (input.files.some(({ path }) => path === `${harnessName}.${extension}`)) {
+      harnessName = `_${harnessName}`;
+    }
+    const harnessPath = `${harnessName}.${extension}`;
+    const harness =
+      input.language === "java"
+        ? `public class ${harnessName} {\n  public static void main(String[] args) throws Exception {\n${test.harness!}\n  }\n}\n`
+        : test.harness!;
+    result = await request(harnessPath, [{ path: harnessPath, content: harness }, ...input.files]);
     passed = result.status === "completed";
   }
   return { ...result, passed };

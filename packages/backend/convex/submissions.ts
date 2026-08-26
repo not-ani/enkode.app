@@ -182,6 +182,14 @@ export const record = internalMutation({
     studentId: v.id("users"),
     assignmentReleaseId: v.id("assignmentReleases"),
     assignmentVersionId: v.id("assignmentVersions"),
+    language: v.optional(
+      v.union(
+        v.literal("python"),
+        v.literal("javascript"),
+        v.literal("typescript"),
+        v.literal("java"),
+      ),
+    ),
     runtimeVersion: v.string(),
     entrypoint: v.string(),
     historySequence: v.number(),
@@ -256,6 +264,7 @@ export const record = internalMutation({
       snapshotId,
       idempotencyKey: input.idempotencyKey,
       attemptNumber: attempts.length + 1,
+      language: input.language,
       runtimeVersion: input.runtimeVersion,
       entrypoint: input.entrypoint,
       execution: input.execution,

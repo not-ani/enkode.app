@@ -73,6 +73,7 @@ export const submit = action({
       studentId: prepared.studentId,
       assignmentReleaseId: prepared.assignmentReleaseId,
       assignmentVersionId: prepared.assignmentVersionId,
+      language: prepared.language,
       runtimeVersion: prepared.runtimeVersion,
       entrypoint: prepared.entrypoint,
       historySequence: prepared.requiredHistorySequence,
