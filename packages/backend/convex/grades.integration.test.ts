@@ -250,6 +250,57 @@ describe("grading and explicit return", () => {
     ]);
   });
 
+  it("keeps Integrity Signal review independent from the returned Grade", async () => {
+    const backend = convexTest(schema, modules);
+    const seeded = await seed(backend);
+    const submissionId = await addSubmission(backend, seeded, 1, 7);
+    const teacher = backend.withIdentity({ subject: "teacher" });
+    const student = backend.withIdentity({ subject: "student" });
+    const gradeId = await teacher.mutation(api.grades.saveDraft, {
+      submissionId,
+      points: 8,
+      inlineFeedback: [],
+    });
+    await teacher.mutation(api.grades.returnGrade, { gradeId });
+    const beforeReview = await student.query(api.grades.mine, {
+      assignmentReleaseId: seeded.assignmentReleaseId,
+    });
+    const signalId = await backend.run(async (ctx) =>
+      ctx.db.insert("integritySignals", {
+        organizationId: seeded.organizationId,
+        workspaceId: seeded.workspaceId,
+        studentId: seeded.studentId,
+        type: "large_paste",
+        state: "open",
+        evidenceKey: "grade-independent-signal",
+        eventSequence: 1,
+        path: "main.py",
+        insertedCharacters: 100,
+        deletedCharacters: 0,
+        resultingFileCharacters: 100,
+        contribution: 1,
+        createdAt: 1,
+      }),
+    );
+
+    await teacher.mutation(api.integritySignals.review, {
+      signalId,
+      state: "reviewed",
+      note: "Reviewed separately from grading.",
+    });
+
+    expect(
+      await student.query(api.grades.mine, {
+        assignmentReleaseId: seeded.assignmentReleaseId,
+      }),
+    ).toEqual(beforeReview);
+    expect(await backend.run(async (ctx) => ctx.db.get(gradeId))).toMatchObject({
+      points: 8,
+      proposedPoints: 7,
+      submissionId,
+    });
+  });
+
   it("enforces Classroom Teacher authority, score bounds, and snapshot paths", async () => {
     const backend = convexTest(schema, modules);
     const seeded = await seed(backend);
