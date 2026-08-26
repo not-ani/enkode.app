@@ -232,4 +232,101 @@ describe("Deadline Exceptions and enforced submission policy", () => {
       1,
     );
   });
+
+  it("keeps adopted-version Deadline facts immutable on historical Submissions", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(101);
+    const seeded = await seed();
+    const secondVersionId = await seeded.backend.run(async (ctx) => {
+      const id = await ctx.db.insert("assignmentVersions", {
+        organizationId: seeded.organizationId,
+        assignmentId: seeded.assignmentId,
+        version: 2,
+        instructions: "Hello again",
+        language: "python",
+        runtimeVersion: "3.12.0",
+        entrypoint: "main.py",
+        createdBy: seeded.teacherId,
+        createdAt: 2,
+      });
+      await ctx.db.patch(seeded.assignmentId, { latestVersion: 2 });
+      await ctx.db.patch(seeded.assignmentReleaseId, {
+        deadlinePolicy: "accept_late",
+        deadlineAt: 100,
+        submissionLimit: undefined,
+      });
+      return id;
+    });
+    const teacher = seeded.backend.withIdentity({ subject: "teacher" });
+    await teacher.mutation(api.assignmentReleases.adoptVersion, {
+      assignmentReleaseId: seeded.assignmentReleaseId,
+      assignmentVersionId: secondVersionId,
+    });
+    const student = seeded.backend.withIdentity({ subject: "student" });
+    const submission = await student.mutation(internal.submissions.record, {
+      ...recordInput(seeded, "adopted-version"),
+      assignmentVersionId: secondVersionId,
+    });
+    await teacher.mutation(api.assignmentReleases.configureSubmissionPolicy, {
+      assignmentReleaseId: seeded.assignmentReleaseId,
+      deadlinePolicy: "no_deadline",
+    });
+
+    expect(submission).toMatchObject({
+      assignmentVersionId: secondVersionId,
+      late: true,
+      effectiveDeadlineAt: 100,
+    });
+    expect(
+      await student.query(api.submissions.mine, { workspaceId: seeded.workspaceId }),
+    ).toMatchObject([
+      {
+        assignmentVersionId: secondVersionId,
+        late: true,
+        effectiveDeadlineAt: 100,
+      },
+    ]);
+  });
+
+  it("makes archived policy read-only while preserving history and idempotent retries", async () => {
+    const seeded = await seed();
+    const student = seeded.backend.withIdentity({ subject: "student" });
+    const teacher = seeded.backend.withIdentity({ subject: "teacher" });
+    const input = recordInput(seeded, "before-archive");
+    const submission = await student.mutation(internal.submissions.record, input);
+
+    await teacher.mutation(api.archive.archiveClassroom, { classroomId: seeded.classroomId });
+
+    await expect(
+      teacher.mutation(api.assignmentReleases.configureSubmissionPolicy, {
+        assignmentReleaseId: seeded.assignmentReleaseId,
+        deadlinePolicy: "hard_close",
+        deadlineAt: 100,
+      }),
+    ).rejects.toThrow("read-only");
+    await expect(
+      teacher.mutation(api.assignmentReleases.setDeadlineException, {
+        assignmentReleaseId: seeded.assignmentReleaseId,
+        studentId: seeded.studentId,
+        deadlinePolicy: "no_deadline",
+      }),
+    ).rejects.toThrow("read-only");
+    await expect(
+      student.mutation(internal.submissions.record, recordInput(seeded, "after-archive")),
+    ).rejects.toThrow("read-only");
+
+    expect(await student.mutation(internal.submissions.record, input)).toMatchObject({
+      _id: submission._id,
+      late: submission.late,
+    });
+    await expect(
+      student.query(api.submissions.mine, { workspaceId: seeded.workspaceId }),
+    ).resolves.toHaveLength(1);
+    await expect(
+      teacher.query(api.submissions.forTeacher, {
+        assignmentReleaseId: seeded.assignmentReleaseId,
+        studentId: seeded.studentId,
+      }),
+    ).resolves.toHaveLength(1);
+  });
 });

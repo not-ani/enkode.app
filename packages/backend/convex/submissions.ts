@@ -223,9 +223,7 @@ export const record = internalMutation({
     const attempts = await ctx.db
       .query("submissions")
       .withIndex("by_release_student_attempt", (index) =>
-        index
-          .eq("assignmentReleaseId", release._id)
-          .eq("studentId", user._id),
+        index.eq("assignmentReleaseId", release._id).eq("studentId", user._id),
       )
       .collect();
     const now = Date.now();
