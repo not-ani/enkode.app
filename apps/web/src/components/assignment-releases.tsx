@@ -28,7 +28,10 @@ function messageFrom(error: unknown) {
 
 export default function AssignmentReleases({ classrooms }: { classrooms: Classroom[] }) {
   const [classroomId, setClassroomId] = useState(classrooms[0]?._id ?? "");
-  const queryArgs = classroomId ? { classroomId } : "skip";
+  const selectedClassroomId = classrooms.some(({ _id }) => _id === classroomId)
+    ? classroomId
+    : (classrooms[0]?._id ?? "");
+  const queryArgs = selectedClassroomId ? { classroomId: selectedClassroomId } : "skip";
   const versions = useQuery(api.assignmentReleases.availableVersions, queryArgs) as
     | VersionOption[]
     | undefined;
@@ -50,7 +53,7 @@ export default function AssignmentReleases({ classrooms }: { classrooms: Classro
     const form = new FormData(event.currentTarget);
     try {
       await createRelease({
-        classroomId,
+        classroomId: selectedClassroomId,
         assignmentVersionId: String(form.get("assignmentVersionId")),
         points: Number(form.get("points")),
       });
@@ -88,7 +91,7 @@ export default function AssignmentReleases({ classrooms }: { classrooms: Classro
           <label className="flex max-w-md flex-col gap-1.5 text-base sm:text-sm">
             Classroom
             <select
-              value={classroomId}
+              value={selectedClassroomId}
               onChange={(event) => setClassroomId(event.target.value)}
               className="border-input bg-background h-10 min-w-0 border px-2.5 text-base outline-none focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring/50 sm:h-8 sm:text-xs"
             >
