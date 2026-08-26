@@ -112,6 +112,21 @@ export default defineSchema({
     .index("by_classroom_student", ["classroomId", "studentId"])
     .index("by_student_status", ["studentId", "status"]),
 
+  assignmentReleases: defineTable({
+    organizationId: v.id("organizations"),
+    classroomId: v.id("classrooms"),
+    assignmentId: v.id("assignments"),
+    assignmentVersionId: v.id("assignmentVersions"),
+    points: v.number(),
+    order: v.number(),
+    publishedAt: v.number(),
+    submissionLimit: v.optional(v.number()),
+    createdBy: v.id("users"),
+    createdAt: v.number(),
+  })
+    .index("by_classroom", ["classroomId", "order"])
+    .index("by_classroom_assignment", ["classroomId", "assignmentId"]),
+
   auditEvents: defineTable({
     organizationId: v.id("organizations"),
     actorKind: v.union(v.literal("developer"), v.literal("user")),

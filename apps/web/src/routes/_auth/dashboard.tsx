@@ -8,6 +8,7 @@ import { useState, type FormEvent } from "react";
 
 import ClassroomEnrollments from "@/components/classroom-enrollments";
 import AssignmentAuthoring from "@/components/assignment-authoring";
+import AssignmentReleases, { StudentAssignmentReleases } from "@/components/assignment-releases";
 import StudentManagement from "@/components/student-management";
 
 export const Route = createFileRoute("/_auth/dashboard")({ component: DashboardContent });
@@ -223,6 +224,7 @@ function DashboardContent() {
           />
         </div>
         <ClassroomEnrollments classrooms={classrooms} />
+        <AssignmentReleases classrooms={classrooms} />
         <StudentManagement />
       </div>
     </main>
@@ -256,6 +258,7 @@ function StudentDashboard({ displayName }: { displayName: string }) {
           </ul>
         )}
       </section>
+      <StudentAssignmentReleases />
     </main>
   );
 }
