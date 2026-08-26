@@ -119,7 +119,12 @@ export function validateChunkPayload(
     if (record.type === "file_change" && !origins.has(String(record.origin))) {
       throw new Error("Work History file change needs an observed or unattributed origin");
     }
-    if (record.type !== "file_change" && record.type !== "workspace_state") {
+    if (
+      record.type !== "file_change" &&
+      record.type !== "workspace_state" &&
+      record.type !== "run" &&
+      record.type !== "submission"
+    ) {
       throw new Error("Invalid Work History event type");
     }
   }

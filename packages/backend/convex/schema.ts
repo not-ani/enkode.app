@@ -263,6 +263,56 @@ export default defineSchema({
     .index("by_workspace", ["workspaceId", "completedAt"])
     .index("by_student", ["studentId", "completedAt"]),
 
+  submissionSnapshots: defineTable({
+    organizationId: v.id("organizations"),
+    workspaceId: v.id("workspaces"),
+    assignmentVersionId: v.id("assignmentVersions"),
+    historySequence: v.number(),
+    objectKey: v.string(),
+    contentHash: v.string(),
+    byteLength: v.number(),
+    files: v.array(v.object({ path: v.string(), contentHash: v.string(), byteLength: v.number() })),
+    createdAt: v.number(),
+  }).index("by_workspace", ["workspaceId", "createdAt"]),
+
+  submissions: defineTable({
+    organizationId: v.id("organizations"),
+    workspaceId: v.id("workspaces"),
+    assignmentReleaseId: v.id("assignmentReleases"),
+    assignmentVersionId: v.id("assignmentVersions"),
+    studentId: v.id("users"),
+    snapshotId: v.id("submissionSnapshots"),
+    idempotencyKey: v.string(),
+    attemptNumber: v.number(),
+    runtimeVersion: v.string(),
+    entrypoint: v.string(),
+    execution: v.object({
+      status: v.union(v.literal("completed"), v.literal("failed"), v.literal("timed_out")),
+      stdout: v.string(),
+      stderr: v.string(),
+      exitCode: v.union(v.number(), v.null()),
+      signal: v.union(v.string(), v.null()),
+    }),
+    testResults: v.array(
+      v.object({
+        evaluationTestId: v.id("evaluationTests"),
+        name: v.string(),
+        visibility: testVisibility,
+        weight: v.number(),
+        passed: v.boolean(),
+        guidance: v.optional(v.string()),
+        stdout: v.string(),
+        stderr: v.string(),
+        exitCode: v.union(v.number(), v.null()),
+      }),
+    ),
+    proposedPoints: v.number(),
+    submittedAt: v.number(),
+  })
+    .index("by_workspace_attempt", ["workspaceId", "attemptNumber"])
+    .index("by_workspace_idempotency", ["workspaceId", "idempotencyKey"])
+    .index("by_release_student_attempt", ["assignmentReleaseId", "studentId", "attemptNumber"]),
+
   auditEvents: defineTable({
     organizationId: v.id("organizations"),
     actorKind: v.union(v.literal("developer"), v.literal("user")),

@@ -28,9 +28,9 @@ The operation is intentionally absent from the web application. Public Better Au
 
 Configure `ENKODE_OBJECT_STORAGE_PROVIDER` and `ENKODE_OBJECT_STORAGE_BUCKET` in the Convex deployment before registering file Materials. The configured upload adapter stores the bytes outside Convex, then passes a provider-neutral receipt containing the object key, original filename, content type, byte size, and SHA-256 digest to Material authoring. Enkode retains that receipt with the immutable Material Version so the attachment can be verified and exported without depending on one storage vendor.
 
-## Work History object storage
+## Work History and Submission object storage
 
-Work History manifests and contiguous acknowledgements live in Convex. Compressed immutable chunks and workspace snapshots use path-style S3-compatible object storage configured in the Convex deployment:
+Work History manifests, contiguous acknowledgements, and Submission metadata live in Convex. Compressed immutable history chunks, history snapshots, and explicitly submitted multi-file snapshots use path-style S3-compatible object storage configured in the Convex deployment:
 
 - `ENKODE_OBJECT_STORAGE_ENDPOINT`
 - `ENKODE_OBJECT_STORAGE_BUCKET`

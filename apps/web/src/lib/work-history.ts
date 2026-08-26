@@ -44,6 +44,13 @@ export type WorkHistoryEvent =
         exitCode: number | null;
       }[];
       observedAt: number;
+    }
+  | {
+      type: "submission";
+      submissionId: string;
+      attemptNumber: number;
+      proposedPoints: number;
+      observedAt: number;
     };
 
 export type StoredHistoryEvent = WorkHistoryEvent & { sequence: number };
@@ -113,7 +120,7 @@ function applyEvents(startingFiles: WorkspaceFile[], events: StoredHistoryEvent[
       files = event.files.map((file) => ({ ...file }));
       continue;
     }
-    if (event.type === "run") continue;
+    if (event.type === "run" || event.type === "submission") continue;
     files = files.map((file) => {
       if (file.path !== event.path) return file;
       let content = file.content;
@@ -365,6 +372,24 @@ export class WorkHistoryRecorder {
     });
   }
 
+  recordSubmission(submission: {
+    submissionId: string;
+    attemptNumber: number;
+    proposedPoints: number;
+  }) {
+    this.capture({ type: "submission", ...submission, observedAt: Date.now() });
+  }
+
+  async finalize() {
+    const requiredSequence = await this.outbox.enqueue(this.workspaceId, {
+      type: "workspace_state",
+      files: this.files(),
+      observedAt: Date.now(),
+    });
+    await this.flush();
+    return requiredSequence;
+  }
+
   async flush() {
     if (this.flushTimer) clearTimeout(this.flushTimer);
     this.flushTimer = undefined;
@@ -428,7 +453,13 @@ export class WorkHistorySync {
     return this.draining;
   }
 
-  private async runDrain() {
+  async drainRequired() {
+    if (this.retryTimer) clearTimeout(this.retryTimer);
+    if (this.draining) await this.draining;
+    await this.runDrain(true);
+  }
+
+  private async runDrain(required = false) {
     try {
       for (const chunk of await this.outbox.chunks(this.workspaceId)) {
         const { acknowledgedThrough } = await this.upload(chunk);
@@ -437,7 +468,8 @@ export class WorkHistorySync {
         }
         await this.outbox.acknowledge(this.workspaceId, acknowledgedThrough);
       }
-    } catch {
+    } catch (error) {
+      if (required) throw error;
       if (!this.stopped) this.retryTimer = setTimeout(() => void this.drain(), 2_000);
     }
   }

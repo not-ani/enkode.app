@@ -3,7 +3,10 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useAction, useMutation, useQuery } from "convex/react";
 import { useCallback, useEffect, useState } from "react";
 
-import WorkspaceEditor, { type RunResult } from "@/components/workspace-editor";
+import WorkspaceEditor, {
+  type RunResult,
+  type SubmissionResult,
+} from "@/components/workspace-editor";
 import { WorkspaceViewers } from "@/components/live-workspace-viewer";
 import type { WorkspaceFile } from "@/lib/workspace-state";
 import type { WorkHistoryChunk } from "@/lib/work-history";
@@ -35,8 +38,13 @@ function AssignmentWorkspaceRoute() {
   const saveWorkspace = useMutation(api.workspaces.save);
   const acceptHistoryChunk = useAction(api.workHistoryUpload.acceptChunk);
   const runWorkspace = useAction(api.runs.run);
+  const submitWorkspace = useAction(api.submissionUpload.submit);
   const [workspace, setWorkspace] = useState<Workspace>();
   const [error, setError] = useState<string>();
+  const submissions = useQuery(
+    api.submissions.mine,
+    workspace ? { workspaceId: workspace._id } : "skip",
+  ) as SubmissionResult[] | undefined;
   const uploadHistory = useCallback(
     async (chunk: WorkHistoryChunk) =>
       await acceptHistoryChunk({
@@ -108,6 +116,15 @@ function AssignmentWorkspaceRoute() {
           onUploadHistory={uploadHistory}
           onRun={async (files) =>
             (await runWorkspace({ workspaceId: workspace._id, files })) as RunResult
+          }
+          submissions={submissions ?? []}
+          onSubmit={async (files, requiredHistorySequence, idempotencyKey) =>
+            (await submitWorkspace({
+              workspaceId: workspace._id,
+              files,
+              requiredHistorySequence,
+              idempotencyKey,
+            })) as SubmissionResult
           }
           onSave={async (files) => {
             await saveWorkspace({ workspaceId: workspace._id, files });

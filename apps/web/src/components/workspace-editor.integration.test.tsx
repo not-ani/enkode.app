@@ -13,6 +13,9 @@ const mocks = vi.hoisted(() => ({
   recorderStart: vi.fn(),
   recorderChange: vi.fn(),
   recorderRun: vi.fn(),
+  recorderFinalize: vi.fn(async () => 2),
+  recorderSubmission: vi.fn(),
+  syncDrainRequired: vi.fn(async () => undefined),
   syncStart: vi.fn(),
   monacoProps: undefined as
     | {
@@ -55,6 +58,7 @@ vi.mock("@/lib/work-history", () => ({
     start = mocks.syncStart;
     stop = vi.fn();
     drain = vi.fn(async () => undefined);
+    drainRequired = mocks.syncDrainRequired;
   },
   WorkHistoryRecorder: class {
     start = mocks.recorderStart;
@@ -63,6 +67,8 @@ vi.mock("@/lib/work-history", () => ({
     clearObservedOrigin = vi.fn();
     recordFileChange = mocks.recorderChange;
     recordRun = mocks.recorderRun;
+    recordSubmission = mocks.recorderSubmission;
+    finalize = mocks.recorderFinalize;
   },
 }));
 
@@ -81,6 +87,13 @@ describe("Workspace editor integration", () => {
         { name: "Greets", passed: true, stdout: "hello\n", stderr: "", exitCode: 0 },
       ],
     }));
+    const onSubmit = vi.fn(async () => ({
+      _id: "submission-1",
+      attemptNumber: 1,
+      proposedPoints: 1,
+      submittedAt: 1,
+      testResults: [],
+    }));
     render(
       <WorkspaceEditor
         assignmentReleaseId="release-1"
@@ -91,6 +104,8 @@ describe("Workspace editor integration", () => {
         onSave={vi.fn(async () => undefined)}
         onUploadHistory={vi.fn(async () => ({ acknowledgedThrough: 1 }))}
         onRun={onRun}
+        submissions={[]}
+        onSubmit={onSubmit}
       />,
     );
 
@@ -140,6 +155,21 @@ describe("Workspace editor integration", () => {
       stderr: "",
       exitCode: 0,
       publicTestResults: [expect.objectContaining({ name: "Greets", passed: true })],
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Submit" }));
+    await screen.findByText("Attempt 1 submitted");
+    expect(mocks.recorderFinalize).toHaveBeenCalledOnce();
+    expect(mocks.syncDrainRequired).toHaveBeenCalledOnce();
+    expect(onSubmit).toHaveBeenCalledWith(
+      [{ path: "main.py", content: "print('after')\n" }],
+      2,
+      expect.any(String),
+    );
+    expect(mocks.recorderSubmission).toHaveBeenCalledWith({
+      submissionId: "submission-1",
+      attemptNumber: 1,
+      proposedPoints: 1,
     });
   });
 });

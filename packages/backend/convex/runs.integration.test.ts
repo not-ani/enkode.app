@@ -143,5 +143,6 @@ describe("Student Runs", () => {
         { path: "helper.py", content: "value = 'hello'\n" },
       ],
     );
+    expect(await backend.run(async (ctx) => ctx.db.query("submissions").collect())).toEqual([]);
   });
 });
