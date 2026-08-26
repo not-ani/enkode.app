@@ -193,7 +193,9 @@ export const heartbeat = mutation({
         index.eq("workspaceId", workspaceId).eq("sessionId", sessionId),
       )
       .unique();
-    if (!presence || presence.teacherId !== user._id) throw new ConvexError("Viewer session ended");
+    if (!presence || presence.teacherId !== user._id || presence.expiresAt <= Date.now()) {
+      throw new ConvexError("Viewer session ended");
+    }
     const expiresAt = Date.now() + VIEWER_PRESENCE_TTL_MS;
     await ctx.db.patch(presence._id, { expiresAt });
     await ctx.scheduler.runAt(expiresAt, internal.liveWorkspaces.expire, {

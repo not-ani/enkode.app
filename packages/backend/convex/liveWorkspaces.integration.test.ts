@@ -273,4 +273,26 @@ describe("live Workspace viewing", () => {
       await student.query(api.liveWorkspaces.listViewers, { workspaceId: workspace._id }),
     ).toEqual([expect.objectContaining({ displayName: "Ada Teacher" })]);
   });
+
+  it("does not revive an expired viewer lease with a late heartbeat", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(Date.UTC(2026, 7, 26, 18));
+    const backend = createTestBackend();
+    const { student, teacher, workspace } = await seed(backend);
+    const { expiresAt } = await teacher.mutation(api.liveWorkspaces.enter, {
+      workspaceId: workspace._id,
+      sessionId: "expired-view",
+    });
+
+    vi.setSystemTime(expiresAt);
+    await expect(
+      teacher.mutation(api.liveWorkspaces.heartbeat, {
+        workspaceId: workspace._id,
+        sessionId: "expired-view",
+      }),
+    ).rejects.toThrow("Viewer session ended");
+    expect(
+      await student.query(api.liveWorkspaces.listViewers, { workspaceId: workspace._id }),
+    ).toEqual([]);
+  });
 });
