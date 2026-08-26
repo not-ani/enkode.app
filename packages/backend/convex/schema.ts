@@ -196,9 +196,29 @@ export default defineSchema({
     files: v.array(v.object({ path: v.string(), content: v.string() })),
     createdAt: v.number(),
     updatedAt: v.number(),
+    historyAckSequence: v.optional(v.number()),
   })
     .index("by_release_student", ["assignmentReleaseId", "studentId"])
     .index("by_student", ["studentId"]),
+
+  workHistoryChunks: defineTable({
+    organizationId: v.id("organizations"),
+    workspaceId: v.id("workspaces"),
+    studentId: v.id("users"),
+    startSequence: v.number(),
+    endSequence: v.number(),
+    eventCount: v.number(),
+    contentHash: v.string(),
+    objectKey: v.string(),
+    byteLength: v.number(),
+    encoding: v.literal("gzip-json-v1"),
+    snapshotHash: v.optional(v.string()),
+    snapshotObjectKey: v.optional(v.string()),
+    snapshotByteLength: v.optional(v.number()),
+    committedAt: v.number(),
+  })
+    .index("by_workspace_sequence", ["workspaceId", "startSequence"])
+    .index("by_workspace_hash", ["workspaceId", "contentHash"]),
 
   auditEvents: defineTable({
     organizationId: v.id("organizations"),

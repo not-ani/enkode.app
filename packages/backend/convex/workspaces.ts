@@ -61,6 +61,7 @@ export const open = mutation({
       assignmentVersionId: release.assignmentVersionId,
       studentId: user._id,
       files: starterFiles.map(({ path, content }) => ({ path, content })),
+      historyAckSequence: 0,
       createdAt: now,
       updatedAt: now,
     });

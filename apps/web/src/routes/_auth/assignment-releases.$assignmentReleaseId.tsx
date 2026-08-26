@@ -1,10 +1,11 @@
 import { api } from "@enkode.app/backend/convex/_generated/api";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useMutation, useQuery } from "convex/react";
-import { useEffect, useState } from "react";
+import { useAction, useMutation, useQuery } from "convex/react";
+import { useCallback, useEffect, useState } from "react";
 
 import WorkspaceEditor from "@/components/workspace-editor";
 import type { WorkspaceFile } from "@/lib/workspace-state";
+import type { WorkHistoryChunk } from "@/lib/work-history";
 
 export const Route = createFileRoute("/_auth/assignment-releases/$assignmentReleaseId")({
   component: AssignmentWorkspaceRoute,
@@ -31,8 +32,25 @@ function AssignmentWorkspaceRoute() {
     | undefined;
   const openWorkspace = useMutation(api.workspaces.open);
   const saveWorkspace = useMutation(api.workspaces.save);
+  const acceptHistoryChunk = useAction(api.workHistoryUpload.acceptChunk);
   const [workspace, setWorkspace] = useState<Workspace>();
   const [error, setError] = useState<string>();
+  const uploadHistory = useCallback(
+    async (chunk: WorkHistoryChunk) =>
+      await acceptHistoryChunk({
+        workspaceId: chunk.workspaceId,
+        startSequence: chunk.startSequence,
+        endSequence: chunk.endSequence,
+        eventCount: chunk.eventCount,
+        contentHash: chunk.contentHash,
+        byteLength: chunk.byteLength,
+        bytes: chunk.bytes,
+        snapshotHash: chunk.snapshotHash,
+        snapshotByteLength: chunk.snapshotByteLength,
+        snapshotBytes: chunk.snapshotBytes,
+      }),
+    [acceptHistoryChunk],
+  );
 
   useEffect(() => {
     let active = true;
@@ -84,6 +102,7 @@ function AssignmentWorkspaceRoute() {
           files={workspace.files}
           entrypoint={release.entrypoint}
           runtimeVersion={release.runtimeVersion}
+          onUploadHistory={uploadHistory}
           onSave={async (files) => {
             await saveWorkspace({ workspaceId: workspace._id, files });
             setWorkspace((current) => (current ? { ...current, files } : current));

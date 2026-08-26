@@ -1,7 +1,15 @@
 import { Button } from "@enkode.app/ui/components/button";
 import { env } from "@enkode.app/env/web";
+import type { OnMount } from "@monaco-editor/react";
 import type * as Monaco from "monaco-editor/editor/editor.api";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+
+import {
+  createIndexedDbWorkHistoryOutbox,
+  WorkHistoryRecorder,
+  WorkHistorySync,
+  type WorkHistoryChunk,
+} from "@/lib/work-history";
 
 import { WebSocketLanguageServiceTransport } from "@/lib/language-service-websocket";
 import {
@@ -26,6 +34,7 @@ type WorkspaceEditorProps = {
   entrypoint: string;
   runtimeVersion: string;
   onSave: (files: WorkspaceFile[]) => Promise<void>;
+  onUploadHistory: (chunk: WorkHistoryChunk) => Promise<{ acknowledgedThrough: number }>;
 };
 
 export default function WorkspaceEditor({
@@ -35,6 +44,7 @@ export default function WorkspaceEditor({
   entrypoint,
   runtimeVersion,
   onSave,
+  onUploadHistory,
 }: WorkspaceEditorProps) {
   const draftStore = useMemo(
     () =>
@@ -66,6 +76,7 @@ export default function WorkspaceEditor({
   const monacoAdapter = useRef<{ dispose: () => void } | undefined>(undefined);
   const initialFiles = useRef(state.files);
   const latest = useRef({ state, saveState });
+  const historyRecorder = useRef<WorkHistoryRecorder | undefined>(undefined);
   const activeFile = state.files.find(({ path }) => path === state.activePath) ?? state.files[0]!;
 
   useEffect(() => {
@@ -109,6 +120,88 @@ export default function WorkspaceEditor({
     },
     [assignmentReleaseId, draftStore, workspaceId],
   );
+
+  useEffect(() => {
+    let disposed = false;
+    let sync: WorkHistorySync | undefined;
+    let recorder: WorkHistoryRecorder | undefined;
+    void createIndexedDbWorkHistoryOutbox()
+      .then((outbox) => {
+        if (disposed) return;
+        sync = new WorkHistorySync(workspaceId, outbox, onUploadHistory);
+        recorder = new WorkHistoryRecorder(
+          workspaceId,
+          outbox,
+          () => latest.current.state.files,
+          () => void sync?.drain(),
+        );
+        historyRecorder.current = recorder;
+        sync.start();
+        recorder.start();
+      })
+      .catch(() => undefined);
+    return () => {
+      disposed = true;
+      if (historyRecorder.current === recorder) historyRecorder.current = undefined;
+      void recorder?.flush();
+      sync?.stop();
+    };
+  }, [onUploadHistory, workspaceId]);
+
+  const mountEditor = useCallback<OnMount>((editor) => {
+    const domNode = editor.getDomNode();
+    const observePaste = () => historyRecorder.current?.observeOrigin("paste");
+    domNode?.addEventListener("paste", observePaste, true);
+    const keyDisposable = editor.onKeyDown((event) => {
+      const key = event.browserEvent.key.toLowerCase();
+      if ((event.ctrlKey || event.metaKey) && key === "z") {
+        historyRecorder.current?.observeOrigin(event.shiftKey ? "redo" : "undo");
+      } else if ((event.ctrlKey || event.metaKey) && key === "y") {
+        historyRecorder.current?.observeOrigin("redo");
+      } else if (!event.ctrlKey && !event.metaKey && !event.altKey) {
+        historyRecorder.current?.observeOrigin("typing", 100);
+      }
+    });
+    const changeDisposable = editor.onDidChangeModelContent((event) => {
+      historyRecorder.current?.recordFileChange(
+        latest.current.state.activePath,
+        event.changes.map(({ rangeOffset, rangeLength, text }) => ({
+          rangeOffset,
+          rangeLength,
+          text,
+        })),
+        event.isUndoing ? "undo" : event.isRedoing ? "redo" : undefined,
+      );
+    });
+    const wrappedActions = [
+      ["acceptSelectedSuggestion", "completion"],
+      ["editor.action.inlineSuggest.commit", "completion"],
+      ["editor.action.formatDocument", "formatting"],
+      ["editor.action.formatSelection", "formatting"],
+      ["editor.action.quickFix", "quick-fix"],
+      ["editor.action.rename", "rename"],
+    ] as const;
+    const restoreActions = wrappedActions.flatMap(([id, origin]) => {
+      const action = editor.getAction(id);
+      if (!action) return [];
+      const run = action.run.bind(action);
+      action.run = async (args?: unknown) => {
+        historyRecorder.current?.observeOrigin(origin, 10_000);
+        try {
+          await run(args);
+        } finally {
+          historyRecorder.current?.clearObservedOrigin(origin);
+        }
+      };
+      return [() => (action.run = run)];
+    });
+    editor.onDidDispose(() => {
+      domNode?.removeEventListener("paste", observePaste, true);
+      keyDisposable.dispose();
+      changeDisposable.dispose();
+      for (const restore of restoreActions) restore();
+    });
+  }, []);
 
   async function save() {
     setSaveState("saving");
@@ -186,6 +279,7 @@ export default function WorkspaceEditor({
               path={`enkode://${workspaceId}/${activeFile.path}`}
               value={activeFile.content}
               beforeMount={prepareMonaco}
+              onMount={mountEditor}
               onChange={(content) => {
                 const nextContent = content ?? "";
                 setState((current) => editWorkspaceFile(current, activeFile.path, nextContent));
