@@ -26,6 +26,18 @@ export interface ObjectStorageBoundary {
   completeUpload(receipt: StoredObjectReceipt): StoredObjectMetadata;
 }
 
+export type ImmutableObject = {
+  key: string;
+  bytes: Uint8Array;
+  contentType: string;
+  sha256: string;
+};
+
+/** Provider-neutral storage contract shared by uploaded assets and immutable domain objects. */
+export interface ObjectStorage extends ObjectStorageBoundary {
+  putImmutable(object: ImmutableObject): Promise<void>;
+}
+
 function requiredConfiguration(name: string) {
   const value = process.env[name]?.trim();
   if (!value) throw new ConvexError(`Object storage is not configured (${name})`);
@@ -55,6 +67,21 @@ export function validateStoredObjectReceipt(receipt: StoredObjectReceipt) {
   return { storageKey, filename, contentType, byteSize: receipt.byteSize, sha256 };
 }
 
+class ProviderNeutralObjectStorage implements ObjectStorageBoundary {
+  constructor(
+    readonly storageProvider: string,
+    readonly storageBucket: string,
+  ) {}
+
+  completeUpload(receipt: StoredObjectReceipt) {
+    return {
+      storageProvider: this.storageProvider,
+      storageBucket: this.storageBucket,
+      ...validateStoredObjectReceipt(receipt),
+    };
+  }
+}
+
 /**
  * Material authoring consumes only a provider-neutral upload receipt. The upload
  * adapter owns credentials and bytes; this boundary supplies the configured,
@@ -63,22 +90,7 @@ export function validateStoredObjectReceipt(receipt: StoredObjectReceipt) {
 export function configuredObjectStorage(): ObjectStorageBoundary {
   const storageProvider = requiredConfiguration("ENKODE_OBJECT_STORAGE_PROVIDER");
   const storageBucket = requiredConfiguration("ENKODE_OBJECT_STORAGE_BUCKET");
-  return {
-    completeUpload(receipt) {
-      return { storageProvider, storageBucket, ...validateStoredObjectReceipt(receipt) };
-    },
-  };
-}
-
-export type ImmutableObject = {
-  key: string;
-  bytes: Uint8Array;
-  contentType: string;
-  sha256: string;
-};
-
-export interface ObjectStorage {
-  putImmutable(object: ImmutableObject): Promise<void>;
+  return new ProviderNeutralObjectStorage(storageProvider, storageBucket);
 }
 
 function hmac(key: Uint8Array | string, value: string) {
@@ -90,7 +102,10 @@ function encodePath(path: string) {
 }
 
 /** Minimal path-style S3 adapter. Provider details stop at this boundary. */
-export class S3CompatibleObjectStorage implements ObjectStorage {
+export class S3CompatibleObjectStorage
+  extends ProviderNeutralObjectStorage
+  implements ObjectStorage
+{
   constructor(
     private readonly config: {
       endpoint: string;
@@ -98,8 +113,11 @@ export class S3CompatibleObjectStorage implements ObjectStorage {
       region: string;
       accessKeyId: string;
       secretAccessKey: string;
+      provider?: string;
     },
-  ) {}
+  ) {
+    super(config.provider ?? "s3-compatible", config.bucket);
+  }
 
   async putImmutable(object: ImmutableObject) {
     const now = new Date();
@@ -154,8 +172,12 @@ export class S3CompatibleObjectStorage implements ObjectStorage {
   }
 }
 
-export class FakeObjectStorage implements ObjectStorage {
+export class FakeObjectStorage extends ProviderNeutralObjectStorage implements ObjectStorage {
   readonly objects = new Map<string, ImmutableObject>();
+
+  constructor() {
+    super("fake", "memory");
+  }
 
   async putImmutable(object: ImmutableObject) {
     if (createHash("sha256").update(object.bytes).digest("hex") !== object.sha256) {

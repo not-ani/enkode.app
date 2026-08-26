@@ -62,6 +62,44 @@ describe("Work History object storage contract", () => {
     expect(headers.get("authorization")).toContain("AWS4-HMAC-SHA256 Credential=access/");
   });
 
+  it("normalizes Material receipts and immutable history writes through one adapter", async () => {
+    const fetch = vi.fn(async () => new Response(undefined, { status: 200 }));
+    vi.stubGlobal("fetch", fetch);
+    const storage = new S3CompatibleObjectStorage({
+      endpoint: "https://objects.example.test",
+      bucket: "enkode",
+      region: "us-east-1",
+      accessKeyId: "access",
+      secretAccessKey: "secret",
+    });
+    const bytes = new TextEncoder().encode("history");
+
+    expect(
+      storage.completeUpload({
+        storageKey: "organizations/org/materials/guide.pdf",
+        filename: " Guide.pdf ",
+        contentType: " application/pdf ",
+        byteSize: 2048,
+        sha256: "A".repeat(64),
+      }),
+    ).toEqual({
+      storageProvider: "s3-compatible",
+      storageBucket: "enkode",
+      storageKey: "organizations/org/materials/guide.pdf",
+      filename: "Guide.pdf",
+      contentType: "application/pdf",
+      byteSize: 2048,
+      sha256: "a".repeat(64),
+    });
+    await storage.putImmutable({
+      key: "organizations/org/workspaces/ws/history/1-1.json.gz",
+      bytes,
+      contentType: "application/gzip",
+      sha256: sha256(bytes),
+    });
+    expect(fetch).toHaveBeenCalledOnce();
+  });
+
   it("verifies hashes, lengths, ranges, and deterministic organization-scoped keys", () => {
     const bytes = new TextEncoder().encode("chunk");
     const manifest = {
