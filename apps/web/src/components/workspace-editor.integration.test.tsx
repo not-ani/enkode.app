@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   recorderRun: vi.fn(),
   recorderFinalize: vi.fn(async () => 2),
   recorderSubmission: vi.fn(),
+  recorderVersionMerge: vi.fn(),
   syncDrainRequired: vi.fn(async () => undefined),
   syncStart: vi.fn(),
   monacoProps: undefined as
@@ -68,6 +69,7 @@ vi.mock("@/lib/work-history", () => ({
     recordFileChange = mocks.recorderChange;
     recordRun = mocks.recorderRun;
     recordSubmission = mocks.recorderSubmission;
+    recordAssignmentVersionMerge = mocks.recorderVersionMerge;
     finalize = mocks.recorderFinalize;
   },
 }));
@@ -106,6 +108,7 @@ describe("Workspace editor integration", () => {
         onRun={onRun}
         submissions={[]}
         onSubmit={onSubmit}
+        onCompleteVersionMerge={vi.fn(async () => undefined)}
       />,
     );
 
@@ -171,5 +174,78 @@ describe("Workspace editor integration", () => {
       attemptNumber: 1,
       proposedPoints: 1,
     });
+  });
+
+  it("requires acknowledgement and records accepted starter changes before completing a merge", async () => {
+    const onCompleteVersionMerge = vi.fn(async () => undefined);
+    render(
+      <WorkspaceEditor
+        assignmentReleaseId="release-1"
+        workspaceId="workspace-1"
+        files={[{ path: "main.py", content: "print('student')\n" }]}
+        entrypoint="main.py"
+        runtimeVersion="3.12.0"
+        onSave={vi.fn(async () => undefined)}
+        onUploadHistory={vi.fn(async () => ({ acknowledgedThrough: 1 }))}
+        onRun={vi.fn()}
+        submissions={[]}
+        onSubmit={vi.fn()}
+        versionMerge={{
+          mergeId: "merge-1",
+          fromVersion: 1,
+          toVersion: 2,
+          fromAssignmentVersionId: "version-1",
+          toAssignmentVersionId: "version-2",
+          changedStarterFiles: [
+            {
+              path: "main.py",
+              kind: "modified",
+              previousContent: "print('hello')\n",
+              incomingContent: "print('updated')\n",
+              currentContent: "print('student')\n",
+            },
+            {
+              path: "notes.txt",
+              kind: "added",
+              incomingContent: "Read me\n",
+            },
+          ],
+        }}
+        onCompleteVersionMerge={onCompleteVersionMerge}
+      />,
+    );
+
+    await waitFor(() => expect(mocks.recorderStart).toHaveBeenCalledOnce());
+    expect(screen.getByRole("button", { name: "Apply Assignment update" })).toHaveProperty(
+      "disabled",
+      true,
+    );
+    fireEvent.click(screen.getAllByLabelText("Use updated starter")[1]!);
+    fireEvent.click(
+      screen.getByLabelText(
+        "I reviewed every changed starter file and understand these choices update my Workspace.",
+      ),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Apply Assignment update" }));
+
+    await waitFor(() => expect(onCompleteVersionMerge).toHaveBeenCalledOnce());
+    expect(mocks.recorderVersionMerge).toHaveBeenCalledWith({
+      files: [
+        { path: "main.py", content: "print('student')\n" },
+        { path: "notes.txt", content: "Read me\n" },
+      ],
+      fromAssignmentVersionId: "version-1",
+      toAssignmentVersionId: "version-2",
+      acceptedPaths: ["notes.txt"],
+    });
+    expect(mocks.syncDrainRequired).toHaveBeenCalledOnce();
+    expect(onCompleteVersionMerge).toHaveBeenCalledWith(
+      "merge-1",
+      [
+        { path: "main.py", choice: "keep_current" },
+        { path: "notes.txt", choice: "accept_new" },
+      ],
+      2,
+    );
   });
 });

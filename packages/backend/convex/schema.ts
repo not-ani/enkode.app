@@ -192,6 +192,15 @@ export default defineSchema({
     .index("by_classroom", ["classroomId", "order"])
     .index("by_classroom_assignment", ["classroomId", "assignmentId"]),
 
+  assignmentReleaseAdoptions: defineTable({
+    organizationId: v.id("organizations"),
+    assignmentReleaseId: v.id("assignmentReleases"),
+    fromAssignmentVersionId: v.id("assignmentVersions"),
+    toAssignmentVersionId: v.id("assignmentVersions"),
+    adoptedBy: v.id("users"),
+    adoptedAt: v.number(),
+  }).index("by_release", ["assignmentReleaseId", "adoptedAt"]),
+
   materialReleases: defineTable({
     organizationId: v.id("organizations"),
     classroomId: v.id("classrooms"),
@@ -222,6 +231,29 @@ export default defineSchema({
     .index("by_assignment_release", ["assignmentReleaseId"])
     .index("by_student", ["studentId"]),
 
+  workspaceVersionMerges: defineTable({
+    organizationId: v.id("organizations"),
+    workspaceId: v.id("workspaces"),
+    assignmentReleaseId: v.id("assignmentReleases"),
+    adoptionId: v.id("assignmentReleaseAdoptions"),
+    fromAssignmentVersionId: v.id("assignmentVersions"),
+    toAssignmentVersionId: v.id("assignmentVersions"),
+    status: v.union(v.literal("pending"), v.literal("completed"), v.literal("superseded")),
+    createdAt: v.number(),
+    completedAt: v.optional(v.number()),
+    decisions: v.optional(
+      v.array(
+        v.object({
+          path: v.string(),
+          choice: v.union(v.literal("keep_current"), v.literal("accept_new")),
+        }),
+      ),
+    ),
+    historySequence: v.optional(v.number()),
+  })
+    .index("by_workspace_status", ["workspaceId", "status"])
+    .index("by_adoption", ["adoptionId"]),
+
   workHistoryChunks: defineTable({
     organizationId: v.id("organizations"),
     workspaceId: v.id("workspaces"),
@@ -240,6 +272,16 @@ export default defineSchema({
   })
     .index("by_workspace_sequence", ["workspaceId", "startSequence"])
     .index("by_workspace_hash", ["workspaceId", "contentHash"]),
+
+  workspaceAssignmentVersionMergeEvents: defineTable({
+    organizationId: v.id("organizations"),
+    workspaceId: v.id("workspaces"),
+    sequence: v.number(),
+    fromAssignmentVersionId: v.string(),
+    toAssignmentVersionId: v.string(),
+    acceptedPaths: v.array(v.string()),
+    committedAt: v.number(),
+  }).index("by_workspace_sequence", ["workspaceId", "sequence"]),
 
   workspaceViewerPresences: defineTable({
     organizationId: v.id("organizations"),

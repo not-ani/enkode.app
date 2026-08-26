@@ -101,7 +101,7 @@ export const prepare = internalQuery({
       !release ||
       releasePublicationStatus(release) !== "published" ||
       !version ||
-      release.assignmentVersionId !== version._id
+      version.assignmentId !== release.assignmentId
     ) {
       throw new ConvexError("Workspace Assignment Version is unavailable");
     }

@@ -2,7 +2,16 @@ import { Button } from "@enkode.app/ui/components/button";
 import { env } from "@enkode.app/env/web";
 import type { OnMount } from "@monaco-editor/react";
 import type * as Monaco from "monaco-editor/editor/editor.api";
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+} from "react";
 
 import {
   createIndexedDbWorkHistoryOutbox,
@@ -19,10 +28,14 @@ import {
 import { registerPythonMonacoAdapter } from "@/lib/python-monaco-adapter";
 import {
   createLocalWorkspaceDraftStore,
+  createWorkspaceState,
   editWorkspaceFile,
+  applyStarterFileDecisions,
   restoreWorkspaceState,
   workspaceDraftMatches,
   type WorkspaceFile,
+  type StarterFileDecision,
+  type StarterFileMerge,
 } from "@/lib/workspace-state";
 
 const MonacoEditor = lazy(() => import("./workspace-monaco"));
@@ -42,6 +55,19 @@ type WorkspaceEditorProps = {
     idempotencyKey: string,
   ) => Promise<SubmissionResult>;
   submissions: SubmissionResult[];
+  versionMerge?: {
+    mergeId: string;
+    fromVersion: number;
+    toVersion: number;
+    fromAssignmentVersionId: string;
+    toAssignmentVersionId: string;
+    changedStarterFiles: StarterFileMerge[];
+  };
+  onCompleteVersionMerge: (
+    mergeId: string,
+    decisions: StarterFileDecision[],
+    requiredHistorySequence: number,
+  ) => Promise<void>;
 };
 
 export type RunResult = {
@@ -87,6 +113,8 @@ export default function WorkspaceEditor({
   onRun,
   onSubmit,
   submissions,
+  versionMerge,
+  onCompleteVersionMerge,
 }: WorkspaceEditorProps) {
   const draftStore = useMemo(
     () =>
@@ -108,6 +136,7 @@ export default function WorkspaceEditor({
   const [runResult, setRunResult] = useState<RunResult>();
   const [submitState, setSubmitState] = useState<"idle" | "submitting">("idle");
   const [submissionResult, setSubmissionResult] = useState<SubmissionResult>();
+  const [mergeState, setMergeState] = useState<"idle" | "applying">("idle");
   const languageService = useMemo(
     () =>
       new RemotePythonLanguageService(
@@ -320,110 +349,246 @@ export default function WorkspaceEditor({
     }
   }
 
+  async function completeVersionMerge(decisions: StarterFileDecision[], acknowledged: boolean) {
+    if (!versionMerge || !acknowledged) return;
+    setMergeState("applying");
+    setError(undefined);
+    try {
+      if (saveState === "dirty") await onSave(state.files);
+      const nextFiles = applyStarterFileDecisions(
+        state.files,
+        versionMerge.changedStarterFiles,
+        decisions,
+      );
+      const recorder = historyRecorder.current;
+      const sync = historySync.current;
+      if (!recorder || !sync) throw new Error("Work History is still starting");
+      recorder.recordAssignmentVersionMerge({
+        files: nextFiles,
+        fromAssignmentVersionId: versionMerge.fromAssignmentVersionId,
+        toAssignmentVersionId: versionMerge.toAssignmentVersionId,
+        acceptedPaths: decisions
+          .filter(({ choice }) => choice === "accept_new")
+          .map(({ path }) => path),
+      });
+      latest.current = {
+        state: createWorkspaceState(nextFiles, state.activePath),
+        saveState: "saved",
+      };
+      const requiredHistorySequence = await recorder.finalize();
+      await sync.drainRequired();
+      await onCompleteVersionMerge(versionMerge.mergeId, decisions, requiredHistorySequence);
+      draftStore?.remove(assignmentReleaseId);
+      initialFiles.current = nextFiles;
+      for (const file of nextFiles) languageService.updateFile(file.path, file.content);
+      setState(createWorkspaceState(nextFiles, state.activePath));
+      setSaveState("saved");
+    } catch (caught) {
+      latest.current = { state, saveState };
+      setError(caught instanceof Error ? caught.message : "Could not apply the Assignment update");
+    } finally {
+      setMergeState("idle");
+    }
+  }
+
   return (
-    <section className="grid min-h-[36rem] overflow-hidden border border-foreground/10 lg:grid-cols-[13rem_minmax(0,1fr)]">
-      <aside className="border-b border-foreground/10 bg-muted/30 lg:border-r lg:border-b-0">
-        <p className="px-3 py-2 text-xs font-medium tracking-wide text-muted-foreground uppercase">
-          Files
-        </p>
-        <div
-          role="tablist"
-          aria-label="Workspace files"
-          className="flex overflow-x-auto lg:flex-col"
-        >
-          {state.files.map(({ path }) => (
-            <button
-              type="button"
-              role="tab"
-              aria-selected={path === activeFile.path}
-              className="shrink-0 border-l-2 border-transparent px-3 py-2 text-left font-mono text-sm hover:bg-muted aria-selected:border-primary aria-selected:bg-muted"
-              onClick={() => setState((current) => ({ ...current, activePath: path }))}
-              key={path}
-            >
-              {path}
-              {path === entrypoint ? <span className="sr-only"> (entrypoint)</span> : null}
-            </button>
-          ))}
-        </div>
-      </aside>
-      <div className="flex min-w-0 flex-col">
-        <div className="flex min-h-12 items-center justify-between gap-3 border-b border-foreground/10 px-3">
-          <p className="truncate font-mono text-sm">{activeFile.path}</p>
-          <div className="flex items-center gap-3">
-            <LanguageIntelligenceStatus
-              state={intelligenceState}
-              reconnect={() => void languageService.reconnect()}
-            />
-            <p aria-live="polite" className="text-xs text-muted-foreground">
-              {saveState === "dirty" ? "Unsaved" : saveState === "saving" ? "Saving…" : "Saved"}
+    <>
+      {versionMerge ? (
+        <VersionMergePanel
+          merge={versionMerge}
+          applying={mergeState === "applying"}
+          onApply={completeVersionMerge}
+        />
+      ) : null}
+      <section className="grid min-h-[36rem] overflow-hidden border border-foreground/10 lg:grid-cols-[13rem_minmax(0,1fr)]">
+        <aside className="border-b border-foreground/10 bg-muted/30 lg:border-r lg:border-b-0">
+          <p className="px-3 py-2 text-xs font-medium tracking-wide text-muted-foreground uppercase">
+            Files
+          </p>
+          <div
+            role="tablist"
+            aria-label="Workspace files"
+            className="flex overflow-x-auto lg:flex-col"
+          >
+            {state.files.map(({ path }) => (
+              <button
+                type="button"
+                role="tab"
+                aria-selected={path === activeFile.path}
+                className="shrink-0 border-l-2 border-transparent px-3 py-2 text-left font-mono text-sm hover:bg-muted aria-selected:border-primary aria-selected:bg-muted"
+                onClick={() => setState((current) => ({ ...current, activePath: path }))}
+                key={path}
+              >
+                {path}
+                {path === entrypoint ? <span className="sr-only"> (entrypoint)</span> : null}
+              </button>
+            ))}
+          </div>
+        </aside>
+        <div className="flex min-w-0 flex-col">
+          <div className="flex min-h-12 items-center justify-between gap-3 border-b border-foreground/10 px-3">
+            <p className="truncate font-mono text-sm">{activeFile.path}</p>
+            <div className="flex items-center gap-3">
+              <LanguageIntelligenceStatus
+                state={intelligenceState}
+                reconnect={() => void languageService.reconnect()}
+              />
+              <p aria-live="polite" className="text-xs text-muted-foreground">
+                {saveState === "dirty" ? "Unsaved" : saveState === "saving" ? "Saving…" : "Saved"}
+              </p>
+              <Button
+                type="button"
+                size="sm"
+                disabled={runState === "running" || submitState === "submitting"}
+                onClick={() => void run()}
+              >
+                {runState === "running" ? "Running…" : "Run"}
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={
+                  submitState === "submitting" || runState === "running" || saveState === "saving"
+                }
+                onClick={() => void submit()}
+              >
+                {submitState === "submitting" ? "Submitting…" : "Submit"}
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                disabled={saveState !== "dirty"}
+                onClick={() => void save()}
+              >
+                Save
+              </Button>
+            </div>
+          </div>
+          {error ? (
+            <p className="border-b border-foreground/10 px-3 py-2 text-sm text-destructive">
+              {error}
             </p>
-            <Button
-              type="button"
-              size="sm"
-              disabled={runState === "running" || submitState === "submitting"}
-              onClick={() => void run()}
+          ) : null}
+          <div className="min-h-0 flex-1">
+            <Suspense
+              fallback={<div className="p-4 text-sm text-muted-foreground">Loading editor…</div>}
             >
-              {runState === "running" ? "Running…" : "Run"}
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              disabled={
-                submitState === "submitting" || runState === "running" || saveState === "saving"
-              }
-              onClick={() => void submit()}
-            >
-              {submitState === "submitting" ? "Submitting…" : "Submit"}
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              disabled={saveState !== "dirty"}
-              onClick={() => void save()}
-            >
-              Save
-            </Button>
+              <MonacoEditor
+                height="100%"
+                language="python"
+                path={`enkode://${workspaceId}/${activeFile.path}`}
+                value={activeFile.content}
+                beforeMount={prepareMonaco}
+                onMount={mountEditor}
+                onChange={(content) => {
+                  const nextContent = content ?? "";
+                  submitRequestId.current = undefined;
+                  setState((current) => editWorkspaceFile(current, activeFile.path, nextContent));
+                  setSaveState("dirty");
+                  languageService.updateFile(activeFile.path, nextContent);
+                }}
+                options={{
+                  automaticLayout: true,
+                  minimap: { enabled: false },
+                  padding: { top: 12 },
+                  scrollBeyondLastLine: false,
+                  tabSize: 4,
+                }}
+              />
+            </Suspense>
           </div>
         </div>
-        {error ? (
-          <p className="border-b border-foreground/10 px-3 py-2 text-sm text-destructive">
-            {error}
-          </p>
-        ) : null}
-        <div className="min-h-0 flex-1">
-          <Suspense
-            fallback={<div className="p-4 text-sm text-muted-foreground">Loading editor…</div>}
-          >
-            <MonacoEditor
-              height="100%"
-              language="python"
-              path={`enkode://${workspaceId}/${activeFile.path}`}
-              value={activeFile.content}
-              beforeMount={prepareMonaco}
-              onMount={mountEditor}
-              onChange={(content) => {
-                const nextContent = content ?? "";
-                submitRequestId.current = undefined;
-                setState((current) => editWorkspaceFile(current, activeFile.path, nextContent));
-                setSaveState("dirty");
-                languageService.updateFile(activeFile.path, nextContent);
-              }}
-              options={{
-                automaticLayout: true,
-                minimap: { enabled: false },
-                padding: { top: 12 },
-                scrollBeyondLastLine: false,
-                tabSize: 4,
-              }}
-            />
-          </Suspense>
-        </div>
-      </div>
-      {runResult ? <RunResults result={runResult} /> : null}
-      {submissionResult ? <SubmissionResults result={submissionResult} /> : null}
-      {submissions.length > 0 ? <SubmissionHistory submissions={submissions} /> : null}
-    </section>
+        {runResult ? <RunResults result={runResult} /> : null}
+        {submissionResult ? <SubmissionResults result={submissionResult} /> : null}
+        {submissions.length > 0 ? <SubmissionHistory submissions={submissions} /> : null}
+      </section>
+    </>
+  );
+}
+
+function VersionMergePanel({
+  merge,
+  applying,
+  onApply,
+}: {
+  merge: NonNullable<WorkspaceEditorProps["versionMerge"]>;
+  applying: boolean;
+  onApply: (decisions: StarterFileDecision[], acknowledged: boolean) => Promise<void>;
+}) {
+  const [acknowledged, setAcknowledged] = useState(false);
+  function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const decisions = merge.changedStarterFiles.map(({ path }) => ({
+      path,
+      choice:
+        form.get(`decision:${path}`) === "accept_new"
+          ? ("accept_new" as const)
+          : ("keep_current" as const),
+    }));
+    void onApply(decisions, acknowledged);
+  }
+  return (
+    <form className="border border-amber-500/40 bg-amber-500/5 p-4" onSubmit={submit}>
+      <h2 className="font-medium">Assignment Version {merge.toVersion} is available</h2>
+      <p className="mt-1 max-w-[75ch] text-sm text-muted-foreground">
+        Your Workspace remains on Version {merge.fromVersion} until you decide how to handle every
+        changed starter file. Your current files will not be replaced automatically.
+      </p>
+      <ul className="mt-4 grid gap-3">
+        {merge.changedStarterFiles.map((file) => (
+          <li className="border border-foreground/10 bg-background p-3" key={file.path}>
+            <p className="font-mono text-sm">
+              {file.path} · {file.kind}
+            </p>
+            <details className="mt-2">
+              <summary className="cursor-pointer text-sm font-medium">Compare contents</summary>
+              <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                <div>
+                  <p className="mb-1 text-xs text-muted-foreground">Your current file</p>
+                  <pre className="max-h-64 overflow-auto border border-foreground/10 p-2 text-xs">
+                    {file.currentContent ?? "File does not exist"}
+                  </pre>
+                </div>
+                <div>
+                  <p className="mb-1 text-xs text-muted-foreground">Updated starter</p>
+                  <pre className="max-h-64 overflow-auto border border-foreground/10 p-2 text-xs">
+                    {file.incomingContent ?? "File will be removed"}
+                  </pre>
+                </div>
+              </div>
+            </details>
+            <div className="mt-2 flex flex-wrap gap-4 text-sm">
+              <label>
+                <input
+                  type="radio"
+                  name={`decision:${file.path}`}
+                  value="keep_current"
+                  defaultChecked
+                />{" "}
+                Keep my current file
+              </label>
+              <label>
+                <input type="radio" name={`decision:${file.path}`} value="accept_new" />{" "}
+                {file.kind === "removed" ? "Accept removal" : "Use updated starter"}
+              </label>
+            </div>
+          </li>
+        ))}
+      </ul>
+      <label className="mt-4 flex items-start gap-2 text-sm">
+        <input
+          type="checkbox"
+          checked={acknowledged}
+          onChange={(event) => setAcknowledged(event.target.checked)}
+        />
+        I reviewed every changed starter file and understand these choices update my Workspace.
+      </label>
+      <Button className="mt-3" type="submit" disabled={!acknowledged || applying}>
+        {applying ? "Applying update…" : "Apply Assignment update"}
+      </Button>
+    </form>
   );
 }
 
