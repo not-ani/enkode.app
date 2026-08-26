@@ -28,6 +28,22 @@ export type WorkHistoryEvent =
       changes: FileChange[];
       origin: EditOrigin | "unattributed";
       observedAt: number;
+    }
+  | {
+      type: "run";
+      runId: string;
+      status: "completed" | "failed" | "timed_out";
+      stdout: string;
+      stderr: string;
+      exitCode: number | null;
+      publicTests: {
+        name: string;
+        passed: boolean;
+        stdout: string;
+        stderr: string;
+        exitCode: number | null;
+      }[];
+      observedAt: number;
     };
 
 export type StoredHistoryEvent = WorkHistoryEvent & { sequence: number };
@@ -97,6 +113,7 @@ function applyEvents(startingFiles: WorkspaceFile[], events: StoredHistoryEvent[
       files = event.files.map((file) => ({ ...file }));
       continue;
     }
+    if (event.type === "run") continue;
     files = files.map((file) => {
       if (file.path !== event.path) return file;
       let content = file.content;
@@ -318,6 +335,32 @@ export class WorkHistoryRecorder {
       path,
       changes,
       origin: observed ?? "unattributed",
+      observedAt: Date.now(),
+    });
+  }
+
+  recordRun(run: {
+    runId: string;
+    status: "completed" | "failed" | "timed_out";
+    stdout: string;
+    stderr: string;
+    exitCode: number | null;
+    publicTestResults: {
+      name: string;
+      passed: boolean;
+      stdout: string;
+      stderr: string;
+      exitCode: number | null;
+    }[];
+  }) {
+    this.capture({
+      type: "run",
+      runId: run.runId,
+      status: run.status,
+      stdout: run.stdout,
+      stderr: run.stderr,
+      exitCode: run.exitCode,
+      publicTests: run.publicTestResults,
       observedAt: Date.now(),
     });
   }

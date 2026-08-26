@@ -3,7 +3,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useAction, useMutation, useQuery } from "convex/react";
 import { useCallback, useEffect, useState } from "react";
 
-import WorkspaceEditor from "@/components/workspace-editor";
+import WorkspaceEditor, { type RunResult } from "@/components/workspace-editor";
 import type { WorkspaceFile } from "@/lib/workspace-state";
 import type { WorkHistoryChunk } from "@/lib/work-history";
 
@@ -33,6 +33,7 @@ function AssignmentWorkspaceRoute() {
   const openWorkspace = useMutation(api.workspaces.open);
   const saveWorkspace = useMutation(api.workspaces.save);
   const acceptHistoryChunk = useAction(api.workHistoryUpload.acceptChunk);
+  const runWorkspace = useAction(api.runs.run);
   const [workspace, setWorkspace] = useState<Workspace>();
   const [error, setError] = useState<string>();
   const uploadHistory = useCallback(
@@ -103,6 +104,9 @@ function AssignmentWorkspaceRoute() {
           entrypoint={release.entrypoint}
           runtimeVersion={release.runtimeVersion}
           onUploadHistory={uploadHistory}
+          onRun={async (files) =>
+            (await runWorkspace({ workspaceId: workspace._id, files })) as RunResult
+          }
           onSave={async (files) => {
             await saveWorkspace({ workspaceId: workspace._id, files });
             setWorkspace((current) => (current ? { ...current, files } : current));

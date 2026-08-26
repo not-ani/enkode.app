@@ -39,3 +39,7 @@ Work History manifests and contiguous acknowledgements live in Convex. Compresse
 - `ENKODE_OBJECT_STORAGE_SECRET_ACCESS_KEY`
 
 The configured credentials need permission to put objects in the bucket. Enkode uses conditional, content-addressed writes so reconnect and orphan-reconciliation retries cannot replace prior history.
+
+## Python execution
+
+Hosted Enkode sends Run requests to `https://execute.enkode.app`. Fork operators may set `ENKODE_EXECUTION_ENDPOINT` in their Convex deployment to use another engineer-man/Piston-compatible service. The endpoint must expose `/api/v2/execute`; Enkode supplies the exactly pinned Assignment Version runtime and controls timeouts, entrypoints, and public-test harnesses.

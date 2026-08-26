@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { act, render, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import WorkspaceEditor from "./workspace-editor";
@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   prepareLanguageAdapter: vi.fn(() => ({ dispose: vi.fn() })),
   recorderStart: vi.fn(),
   recorderChange: vi.fn(),
+  recorderRun: vi.fn(),
   syncStart: vi.fn(),
   monacoProps: undefined as
     | {
@@ -61,6 +62,7 @@ vi.mock("@/lib/work-history", () => ({
     observeOrigin = vi.fn();
     clearObservedOrigin = vi.fn();
     recordFileChange = mocks.recorderChange;
+    recordRun = mocks.recorderRun;
   },
 }));
 
@@ -72,6 +74,13 @@ describe("Workspace editor integration", () => {
   });
 
   it("keeps editing, Work History, and Python intelligence on independent hooks", async () => {
+    const onRun = vi.fn(async () => ({
+      runId: "run-1",
+      execution: { status: "completed" as const, stdout: "hello\n", stderr: "", exitCode: 0 },
+      publicTestResults: [
+        { name: "Greets", passed: true, stdout: "hello\n", stderr: "", exitCode: 0 },
+      ],
+    }));
     render(
       <WorkspaceEditor
         assignmentReleaseId="release-1"
@@ -81,6 +90,7 @@ describe("Workspace editor integration", () => {
         runtimeVersion="3.12.0"
         onSave={vi.fn(async () => undefined)}
         onUploadHistory={vi.fn(async () => ({ acknowledgedThrough: 1 }))}
+        onRun={onRun}
       />,
     );
 
@@ -119,5 +129,17 @@ describe("Workspace editor integration", () => {
       [{ rangeOffset: 7, rangeLength: 6, text: "'after'" }],
       undefined,
     );
+
+    fireEvent.click(screen.getByRole("button", { name: "Run" }));
+    await screen.findByText("1 of 1 public tests passed");
+    expect(onRun).toHaveBeenCalledWith([{ path: "main.py", content: "print('after')\n" }]);
+    expect(mocks.recorderRun).toHaveBeenCalledWith({
+      runId: "run-1",
+      status: "completed",
+      stdout: "hello\n",
+      stderr: "",
+      exitCode: 0,
+      publicTestResults: [expect.objectContaining({ name: "Greets", passed: true })],
+    });
   });
 });

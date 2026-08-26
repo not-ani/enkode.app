@@ -220,6 +220,37 @@ export default defineSchema({
     .index("by_workspace_sequence", ["workspaceId", "startSequence"])
     .index("by_workspace_hash", ["workspaceId", "contentHash"]),
 
+  runs: defineTable({
+    organizationId: v.id("organizations"),
+    workspaceId: v.id("workspaces"),
+    assignmentReleaseId: v.id("assignmentReleases"),
+    assignmentVersionId: v.id("assignmentVersions"),
+    studentId: v.id("users"),
+    runtimeVersion: v.string(),
+    entrypoint: v.string(),
+    files: v.array(v.object({ path: v.string(), content: v.string() })),
+    execution: v.object({
+      status: v.union(v.literal("completed"), v.literal("failed"), v.literal("timed_out")),
+      stdout: v.string(),
+      stderr: v.string(),
+      exitCode: v.union(v.number(), v.null()),
+      signal: v.union(v.string(), v.null()),
+    }),
+    publicTestResults: v.array(
+      v.object({
+        evaluationTestId: v.id("evaluationTests"),
+        name: v.string(),
+        passed: v.boolean(),
+        stdout: v.string(),
+        stderr: v.string(),
+        exitCode: v.union(v.number(), v.null()),
+      }),
+    ),
+    completedAt: v.number(),
+  })
+    .index("by_workspace", ["workspaceId", "completedAt"])
+    .index("by_student", ["studentId", "completedAt"]),
+
   auditEvents: defineTable({
     organizationId: v.id("organizations"),
     actorKind: v.union(v.literal("developer"), v.literal("user")),

@@ -32,6 +32,42 @@ afterEach(() => {
 });
 
 describe("Work History capture", () => {
+  it("appends Run results without changing the replayed Workspace snapshot", async () => {
+    const outbox = createMemoryWorkHistoryOutbox();
+    const recorder = new WorkHistoryRecorder(
+      "workspace-1",
+      outbox,
+      () => files,
+      () => undefined,
+    );
+    recorder.start();
+    recorder.recordRun({
+      runId: "run-1",
+      status: "completed",
+      stdout: "hello\n",
+      stderr: "",
+      exitCode: 0,
+      publicTestResults: [
+        { name: "Greets", passed: true, stdout: "hello\n", stderr: "", exitCode: 0 },
+      ],
+    });
+    await settleCapture();
+    await recorder.flush();
+
+    const [chunk] = await outbox.chunks("workspace-1");
+    expect(await eventsIn(chunk!.bytes)).toEqual([
+      expect.objectContaining({ type: "workspace_state", sequence: 1 }),
+      expect.objectContaining({
+        type: "run",
+        sequence: 2,
+        runId: "run-1",
+        stdout: "hello\n",
+        publicTests: [expect.objectContaining({ name: "Greets", passed: true })],
+      }),
+    ]);
+    expect((await snapshotIn(chunk!.snapshotBytes)).files).toEqual(files);
+  });
+
   it("records every observed Edit Origin and preserves unattributed changes honestly", async () => {
     const outbox = createMemoryWorkHistoryOutbox();
     const recorder = new WorkHistoryRecorder(
