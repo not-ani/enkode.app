@@ -4,20 +4,23 @@ import { betterAuth } from "better-auth/minimal";
 
 import { components } from "./_generated/api";
 import type { DataModel } from "./_generated/dataModel";
-import { query } from "./_generated/server";
 import authConfig from "./auth.config";
-
-const siteUrl = process.env.SITE_URL!;
 
 export const authComponent = createClient<DataModel>(components.betterAuth);
 
-function createAuth(ctx: GenericCtx<DataModel>) {
+function authOptions(ctx: GenericCtx<DataModel>, disableSignUp: boolean) {
+  const siteUrl = process.env.SITE_URL;
+  if (!siteUrl) {
+    throw new Error("SITE_URL is not configured");
+  }
+
   return betterAuth({
     baseURL: siteUrl,
     trustedOrigins: [siteUrl],
     database: authComponent.adapter(ctx),
     emailAndPassword: {
       enabled: true,
+      disableSignUp,
       requireEmailVerification: false,
     },
     plugins: [
@@ -29,11 +32,10 @@ function createAuth(ctx: GenericCtx<DataModel>) {
   });
 }
 
-export { createAuth };
+export function createAuth(ctx: GenericCtx<DataModel>) {
+  return authOptions(ctx, true);
+}
 
-export const getCurrentUser = query({
-  args: {},
-  handler: async (ctx) => {
-    return await authComponent.safeGetAuthUser(ctx);
-  },
-});
+export function createProvisioningAuth(ctx: GenericCtx<DataModel>) {
+  return authOptions(ctx, false);
+}

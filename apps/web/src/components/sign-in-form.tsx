@@ -8,7 +8,7 @@ import z from "zod";
 
 import { authClient } from "@/lib/auth-client";
 
-export default function SignInForm({ onSwitchToSignUp }: { onSwitchToSignUp: () => void }) {
+export default function SignInForm() {
   const navigate = useNavigate({
     from: "/",
   });
@@ -47,7 +47,10 @@ export default function SignInForm({ onSwitchToSignUp }: { onSwitchToSignUp: () 
 
   return (
     <div className="mx-auto w-full mt-10 max-w-md p-6">
-      <h1 className="mb-6 text-center text-3xl font-bold">Welcome Back</h1>
+      <h1 className="mb-2 text-center text-3xl font-bold">Welcome back</h1>
+      <p className="text-muted-foreground mb-6 text-center text-sm">
+        Sign in with the email your organization provided.
+      </p>
 
       <form
         onSubmit={(e) => {
@@ -114,15 +117,9 @@ export default function SignInForm({ onSwitchToSignUp }: { onSwitchToSignUp: () 
         </form.Subscribe>
       </form>
 
-      <div className="mt-4 text-center">
-        <Button
-          variant="link"
-          onClick={onSwitchToSignUp}
-          className="text-indigo-600 hover:text-indigo-800"
-        >
-          Need an account? Sign Up
-        </Button>
-      </div>
+      <p className="text-muted-foreground mt-4 text-center text-sm">
+        Need access? Ask your organization or teacher to provision your account.
+      </p>
     </div>
   );
 }

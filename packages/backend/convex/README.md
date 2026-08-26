@@ -1,88 +1,25 @@
-# Welcome to your Convex functions directory!
+# Enkode backend
 
-Write your Convex functions here.
-See https://docs.convex.dev/functions for more.
+Convex is Enkode's required transactional backend. Configure the usual Better Auth variables plus a long, random `DEVELOPER_PROVISIONING_SECRET` in the Convex deployment.
 
-A query function that takes two arguments looks like:
+## Provision the first Teacher
 
-```ts
-// convex/myFunctions.ts
-import { query } from "./_generated/server";
-import { v } from "convex/values";
+Developers create an Organization and its first Teacher through the protected HTTP operation. The password is sent directly to Better Auth and is never stored in Enkode's domain tables or returned by the operation.
 
-export const myQueryFunction = query({
-  // Validators for arguments.
-  args: {
-    first: v.number(),
-    second: v.string(),
-  },
-
-  // Function implementation.
-  handler: async (ctx, args) => {
-    // Read the database as many times as you need here.
-    // See https://docs.convex.dev/database/reading-data.
-    const documents = await ctx.db.query("tablename").collect();
-
-    // Arguments passed from the client are properties of the args object.
-    console.log(args.first, args.second);
-
-    // Write arbitrary JavaScript here: filter, aggregate, build derived data,
-    // remove non-public properties, or create new objects.
-    return documents;
-  },
-});
+```sh
+curl "$CONVEX_SITE_URL/api/developer/provision-organization" \
+  --request POST \
+  --header "Authorization: Bearer $DEVELOPER_PROVISIONING_SECRET" \
+  --header "Content-Type: application/json" \
+  --data '{
+    "organization": { "name": "Example Academy", "slug": "example-academy" },
+    "teacher": {
+      "name": "Ada Lovelace",
+      "username": "ada",
+      "email": "ada@example.edu",
+      "password": "replace-with-a-strong-password"
+    }
+  }'
 ```
 
-Using this query function in a React component looks like:
-
-```ts
-const data = useQuery(api.myFunctions.myQueryFunction, {
-  first: 10,
-  second: "hello",
-});
-```
-
-A mutation function looks like:
-
-```ts
-// convex/myFunctions.ts
-import { mutation } from "./_generated/server";
-import { v } from "convex/values";
-
-export const myMutationFunction = mutation({
-  // Validators for arguments.
-  args: {
-    first: v.string(),
-    second: v.string(),
-  },
-
-  // Function implementation.
-  handler: async (ctx, args) => {
-    // Insert or modify documents in the database here.
-    // Mutations can also read from the database like queries.
-    // See https://docs.convex.dev/database/writing-data.
-    const message = { body: args.first, author: args.second };
-    const id = await ctx.db.insert("messages", message);
-
-    // Optionally, return a value from your mutation.
-    return await ctx.db.get("messages", id);
-  },
-});
-```
-
-Using this mutation function in a React component looks like:
-
-```ts
-const mutation = useMutation(api.myFunctions.myMutationFunction);
-function handleButtonPress() {
-  // fire and forget, the most common way to use mutations
-  mutation({ first: "Hello!", second: "me" });
-  // OR
-  // use the result once the mutation has completed
-  mutation({ first: "Hello!", second: "me" }).then((result) => console.log(result));
-}
-```
-
-Use the Convex CLI to push your functions to a deployment. See everything
-the Convex CLI can do by running `npx convex -h` in your project root
-directory. To learn more, launch the docs with `npx convex docs`.
+The operation is intentionally absent from the web application. Public Better Auth email signup remains disabled at the backend route; provisioned users sign in with the credential a developer or Teacher issued.

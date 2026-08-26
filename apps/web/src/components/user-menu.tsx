@@ -14,11 +14,13 @@ import { useQuery } from "convex/react";
 import { authClient } from "@/lib/auth-client";
 
 export default function UserMenu() {
-  const user = useQuery(api.auth.getCurrentUser);
+  const user = useQuery(api.users.current);
 
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger render={<Button variant="outline" />}>{user?.name}</DropdownMenuTrigger>
+      <DropdownMenuTrigger render={<Button variant="outline" />}>
+        {user?.displayName}
+      </DropdownMenuTrigger>
       <DropdownMenuContent className="bg-card">
         <DropdownMenuGroup>
           <DropdownMenuLabel>My Account</DropdownMenuLabel>
