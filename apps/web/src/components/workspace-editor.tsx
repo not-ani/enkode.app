@@ -1,6 +1,14 @@
 import { Button } from "@enkode.app/ui/components/button";
-import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { env } from "@enkode.app/env/web";
+import type * as Monaco from "monaco-editor/editor/editor.api";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { WebSocketLanguageServiceTransport } from "@/lib/language-service-websocket";
+import {
+  type LanguageIntelligenceState,
+  RemotePythonLanguageService,
+} from "@/lib/python-language-service";
+import { registerPythonMonacoAdapter } from "@/lib/python-monaco-adapter";
 import {
   createLocalWorkspaceDraftStore,
   editWorkspaceFile,
@@ -16,6 +24,7 @@ type WorkspaceEditorProps = {
   workspaceId: string;
   files: WorkspaceFile[];
   entrypoint: string;
+  runtimeVersion: string;
   onSave: (files: WorkspaceFile[]) => Promise<void>;
 };
 
@@ -24,6 +33,7 @@ export default function WorkspaceEditor({
   workspaceId,
   files,
   entrypoint,
+  runtimeVersion,
   onSave,
 }: WorkspaceEditorProps) {
   const draftStore = useMemo(
@@ -42,9 +52,46 @@ export default function WorkspaceEditor({
     workspaceDraftMatches(workspaceId, files, restoredDraft) ? "dirty" : "saved",
   );
   const [error, setError] = useState<string>();
+  const languageService = useMemo(
+    () =>
+      new RemotePythonLanguageService(
+        env.VITE_PYRIGHT_LANGUAGE_SERVICE_URL,
+        new WebSocketLanguageServiceTransport(),
+      ),
+    [],
+  );
+  const [intelligenceState, setIntelligenceState] = useState<LanguageIntelligenceState>(() =>
+    languageService.getState(),
+  );
+  const monacoAdapter = useRef<{ dispose: () => void } | undefined>(undefined);
+  const initialFiles = useRef(state.files);
   const latest = useRef({ state, saveState });
-  latest.current = { state, saveState };
   const activeFile = state.files.find(({ path }) => path === state.activePath) ?? state.files[0]!;
+
+  useEffect(() => {
+    latest.current = { state, saveState };
+  }, [saveState, state]);
+
+  useEffect(() => languageService.subscribeState(setIntelligenceState), [languageService]);
+
+  useEffect(() => {
+    void languageService.connect({
+      workspaceId,
+      runtime: { language: "python", version: runtimeVersion },
+      files: initialFiles.current,
+    });
+    return () => languageService.disconnect();
+  }, [languageService, runtimeVersion, workspaceId]);
+
+  useEffect(() => () => monacoAdapter.current?.dispose(), []);
+
+  const prepareMonaco = useCallback(
+    (monaco: typeof Monaco) => {
+      monacoAdapter.current?.dispose();
+      monacoAdapter.current = registerPythonMonacoAdapter(monaco, languageService, workspaceId);
+    },
+    [languageService, workspaceId],
+  );
 
   useEffect(() => {
     if (saveState !== "dirty" || !draftStore) return;
@@ -107,6 +154,10 @@ export default function WorkspaceEditor({
         <div className="flex min-h-12 items-center justify-between gap-3 border-b border-foreground/10 px-3">
           <p className="truncate font-mono text-sm">{activeFile.path}</p>
           <div className="flex items-center gap-3">
+            <LanguageIntelligenceStatus
+              state={intelligenceState}
+              reconnect={() => void languageService.reconnect()}
+            />
             <p aria-live="polite" className="text-xs text-muted-foreground">
               {saveState === "dirty" ? "Unsaved" : saveState === "saving" ? "Saving…" : "Saved"}
             </p>
@@ -134,9 +185,12 @@ export default function WorkspaceEditor({
               language="python"
               path={`enkode://${workspaceId}/${activeFile.path}`}
               value={activeFile.content}
+              beforeMount={prepareMonaco}
               onChange={(content) => {
-                setState((current) => editWorkspaceFile(current, activeFile.path, content ?? ""));
+                const nextContent = content ?? "";
+                setState((current) => editWorkspaceFile(current, activeFile.path, nextContent));
                 setSaveState("dirty");
+                languageService.updateFile(activeFile.path, nextContent);
               }}
               options={{
                 automaticLayout: true,
@@ -150,5 +204,40 @@ export default function WorkspaceEditor({
         </div>
       </div>
     </section>
+  );
+}
+
+function LanguageIntelligenceStatus({
+  state,
+  reconnect,
+}: {
+  state: LanguageIntelligenceState;
+  reconnect: () => void;
+}) {
+  const label = {
+    disconnected: "Intelligence disconnected",
+    connecting: "Intelligence connecting…",
+    ready: "Python intelligence ready",
+    failed: "Python intelligence unavailable",
+  }[state.status];
+  return (
+    <div className="flex items-center gap-2">
+      <p
+        aria-live="polite"
+        title={state.status === "failed" ? state.message : undefined}
+        className="text-xs text-muted-foreground"
+      >
+        {label}
+      </p>
+      {state.status === "failed" || state.status === "disconnected" ? (
+        <button
+          type="button"
+          className="text-xs font-medium text-foreground underline-offset-4 hover:underline"
+          onClick={reconnect}
+        >
+          Reconnect
+        </button>
+      ) : null}
+    </div>
   );
 }

@@ -33,6 +33,10 @@ Follow the prompts to create a new Convex project and connect it to your applica
 
 Copy environment variables from `packages/backend/.env.local` to `apps/*/.env`.
 
+Set `VITE_PYRIGHT_LANGUAGE_SERVICE_URL` in `apps/web/.env` to the `ws://` or `wss://`
+endpoint for an Enkode-compatible, Pyright-backed language service. The browser speaks only the
+Enkode language-service protocol; the gateway owns the Pyright transport and server lifecycle.
+
 Then, run the development server:
 
 ```bash

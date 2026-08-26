@@ -83,6 +83,7 @@ function AssignmentWorkspaceRoute() {
           workspaceId={workspace._id}
           files={workspace.files}
           entrypoint={release.entrypoint}
+          runtimeVersion={release.runtimeVersion}
           onSave={async (files) => {
             await saveWorkspace({ workspaceId: workspace._id, files });
             setWorkspace((current) => (current ? { ...current, files } : current));
