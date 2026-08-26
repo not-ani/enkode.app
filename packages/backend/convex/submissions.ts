@@ -1,6 +1,7 @@
 import { ConvexError, v } from "convex/values";
 
 import type { Doc } from "./_generated/dataModel";
+import { internal } from "./_generated/api";
 import { internalMutation, internalQuery, query } from "./_generated/server";
 import { requireClassroomTeacher, requireRole } from "./authorization";
 import { releasePublicationStatus } from "./releasePolicy";
@@ -201,7 +202,54 @@ export const record = internalMutation({
       proposedPoints: input.proposedPoints,
       submittedAt: now,
     });
+    await ctx.scheduler.runAfter(0, internal.submissionSimilarity.compare, { submissionId });
     return studentVisible((await ctx.db.get(submissionId))!);
+  },
+});
+
+export const similarityPlan = internalQuery({
+  args: { submissionId: v.id("submissions") },
+  handler: async (ctx, { submissionId }) => {
+    const submission = await ctx.db.get(submissionId);
+    if (!submission) throw new ConvexError("Submission not found");
+    const snapshot = await ctx.db.get(submission.snapshotId);
+    if (!snapshot || snapshot.organizationId !== submission.organizationId) {
+      throw new ConvexError("Submission snapshot is unavailable");
+    }
+    const candidates = await ctx.db
+      .query("submissions")
+      .withIndex("by_organization_version", (index) =>
+        index
+          .eq("organizationId", submission.organizationId)
+          .eq("assignmentVersionId", submission.assignmentVersionId),
+      )
+      .filter((filter) =>
+        filter.and(
+          filter.neq(filter.field("_id"), submission._id),
+          filter.neq(filter.field("studentId"), submission.studentId),
+        ),
+      )
+      .collect();
+    const candidateSnapshots = await Promise.all(
+      candidates.map(async (candidate) => {
+        const candidateSnapshot = await ctx.db.get(candidate.snapshotId);
+        if (
+          !candidateSnapshot ||
+          candidateSnapshot.organizationId !== submission.organizationId ||
+          candidateSnapshot.assignmentVersionId !== submission.assignmentVersionId
+        ) {
+          throw new ConvexError("Related Submission snapshot is unavailable");
+        }
+        return { submission: candidate, snapshot: candidateSnapshot };
+      }),
+    );
+    const starterFiles = await ctx.db
+      .query("assignmentStarterFiles")
+      .withIndex("by_version", (index) =>
+        index.eq("assignmentVersionId", submission.assignmentVersionId),
+      )
+      .collect();
+    return { submission, snapshot, candidates: candidateSnapshots, starterFiles };
   },
 });
 

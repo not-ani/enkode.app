@@ -49,4 +49,44 @@ describe("Integrity Signal review", () => {
       expect(review).toHaveBeenCalledWith("signal", "reviewed", "Reviewed with the Student."),
     );
   });
+
+  it("shows only narrow cross-Classroom Similarity evidence", async () => {
+    const inspect = vi.fn(async () => ({
+      similarity: {
+        students: [
+          { id: "student-1", displayName: "Ada", username: "ada" },
+          { id: "student-2", displayName: "Grace", username: "grace" },
+        ],
+        matchedSpans: [
+          {
+            path: "main.py",
+            start: 20,
+            end: 52,
+            relatedPath: "helpers.py",
+            relatedStart: 4,
+            relatedEnd: 36,
+            text: "return [score / maximum for score in scores]",
+          },
+        ],
+        provenance: [
+          { submissionId: "submission-1", workspaceId: "workspace-1", historySequence: 12 },
+          { submissionId: "submission-2", workspaceId: "workspace-2", historySequence: 18 },
+        ],
+      },
+    }));
+    render(
+      <IntegritySignalReview
+        signals={[{ _id: "similarity", type: "similarity", state: "open" }]}
+        inspect={inspect}
+        review={vi.fn(async () => undefined)}
+      />,
+    );
+
+    expect(screen.getByText("Submission evidence")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Inspect evidence" }));
+    expect(await screen.findByText("Ada (@ada) and Grace (@grace)")).toBeTruthy();
+    expect(screen.getByText(/main.py 20–52 ↔ helpers.py 4–36/)).toBeTruthy();
+    expect(screen.getByText("return [score / maximum for score in scores]")).toBeTruthy();
+    expect(screen.queryByText(/cheating/i)).toBeNull();
+  });
 });

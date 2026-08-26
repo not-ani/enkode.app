@@ -4,7 +4,7 @@ import { useState } from "react";
 
 export type IntegritySignal = {
   _id: string;
-  type: "large_paste" | "unattributed_bulk_change" | "work_history_gap";
+  type: "large_paste" | "unattributed_bulk_change" | "work_history_gap" | "similarity";
   state: "open" | "reviewed" | "dismissed";
   eventSequence?: number;
   path?: string;
@@ -25,12 +25,30 @@ type Evidence = {
     origin?: string;
     changes?: { rangeOffset: number; rangeLength: number; text: string }[];
   };
+  similarity?: {
+    students: { id: string; displayName: string; username: string }[];
+    matchedSpans: {
+      path: string;
+      start: number;
+      end: number;
+      relatedPath: string;
+      relatedStart: number;
+      relatedEnd: number;
+      text: string;
+    }[];
+    provenance: {
+      submissionId?: string;
+      workspaceId?: string;
+      historySequence?: number;
+    }[];
+  };
 };
 
 const labels = {
   large_paste: "Large Paste",
   unattributed_bulk_change: "Unattributed Bulk Change",
   work_history_gap: "Work History Gap",
+  similarity: "Similarity",
 };
 
 export default function IntegritySignalReview({
@@ -93,9 +111,11 @@ export default function IntegritySignalReview({
                   <div>
                     <h3 className="font-medium">{labels[signal.type]}</h3>
                     <p className="text-sm text-muted-foreground">
-                      {signal.eventSequence !== undefined
-                        ? `Event ${signal.eventSequence} · ${signal.path}`
-                        : `Sequence ${signal.sequenceStart}–${signal.sequenceEnd} · ${signal.gapReason}`}
+                      {signal.type === "similarity"
+                        ? "Submission evidence"
+                        : signal.eventSequence !== undefined
+                          ? `Event ${signal.eventSequence} · ${signal.path}`
+                          : `Sequence ${signal.sequenceStart}–${signal.sequenceEnd} · ${signal.gapReason}`}
                     </p>
                   </div>
                   <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
@@ -118,6 +138,38 @@ export default function IntegritySignalReview({
                       {inspected.event.changes?.length ?? 0} exact model change
                       {(inspected.event.changes?.length ?? 0) === 1 ? "" : "s"}
                     </p>
+                  </div>
+                ) : null}
+                {inspected?.similarity ? (
+                  <div className="grid max-w-3xl gap-3 border-l-2 border-foreground/20 pl-3 text-sm">
+                    <p>
+                      {inspected.similarity.students
+                        .map(({ displayName, username }) => `${displayName} (@${username})`)
+                        .join(" and ")}
+                    </p>
+                    <p className="text-muted-foreground">
+                      Related provenance:{" "}
+                      {inspected.similarity.provenance
+                        .map(
+                          ({ historySequence }) => `Submission at Work History ${historySequence}`,
+                        )
+                        .join(" · ")}
+                    </p>
+                    <ul className="grid gap-3">
+                      {inspected.similarity.matchedSpans.map((span) => (
+                        <li
+                          key={`${span.path}:${span.start}:${span.relatedPath}:${span.relatedStart}`}
+                        >
+                          <p className="text-muted-foreground">
+                            {span.path} {span.start}–{span.end} ↔ {span.relatedPath}{" "}
+                            {span.relatedStart}–{span.relatedEnd}
+                          </p>
+                          <pre className="mt-1 overflow-x-auto bg-muted p-3 text-xs whitespace-pre-wrap">
+                            <code>{span.text}</code>
+                          </pre>
+                        </li>
+                      ))}
+                    </ul>
                   </div>
                 ) : null}
                 <div className="flex flex-wrap gap-2">

@@ -14,6 +14,7 @@ const integritySignalType = v.union(
   v.literal("large_paste"),
   v.literal("unattributed_bulk_change"),
   v.literal("work_history_gap"),
+  v.literal("similarity"),
 );
 const integritySignalState = v.union(
   v.literal("open"),
@@ -330,8 +331,8 @@ export default defineSchema({
   })
     .index("by_workspace_attempt", ["workspaceId", "attemptNumber"])
     .index("by_workspace_idempotency", ["workspaceId", "idempotencyKey"])
-    .index("by_release_student_attempt", ["assignmentReleaseId", "studentId", "attemptNumber"]),
-
+    .index("by_release_student_attempt", ["assignmentReleaseId", "studentId", "attemptNumber"])
+    .index("by_organization_version", ["organizationId", "assignmentVersionId", "submittedAt"]),
   integritySignals: defineTable({
     organizationId: v.id("organizations"),
     workspaceId: v.id("workspaces"),
@@ -348,12 +349,32 @@ export default defineSchema({
     sequenceStart: v.optional(v.number()),
     sequenceEnd: v.optional(v.number()),
     gapReason: v.optional(v.string()),
+    relatedWorkspaceId: v.optional(v.id("workspaces")),
+    relatedStudentId: v.optional(v.id("users")),
+    submissionId: v.optional(v.id("submissions")),
+    relatedSubmissionId: v.optional(v.id("submissions")),
+    submissionHistorySequence: v.optional(v.number()),
+    relatedSubmissionHistorySequence: v.optional(v.number()),
+    matchedSpans: v.optional(
+      v.array(
+        v.object({
+          path: v.string(),
+          start: v.number(),
+          end: v.number(),
+          relatedPath: v.string(),
+          relatedStart: v.number(),
+          relatedEnd: v.number(),
+          text: v.string(),
+        }),
+      ),
+    ),
     createdAt: v.number(),
     reviewedBy: v.optional(v.id("users")),
     reviewedAt: v.optional(v.number()),
     teacherNote: v.optional(v.string()),
   })
     .index("by_workspace", ["workspaceId", "createdAt"])
+    .index("by_related_workspace", ["relatedWorkspaceId", "createdAt"])
     .index("by_evidence_key", ["evidenceKey"]),
 
   grades: defineTable({

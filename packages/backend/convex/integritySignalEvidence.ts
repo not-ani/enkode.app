@@ -11,6 +11,7 @@ export const inspect = action({
   args: { signalId: v.id("integritySignals") },
   handler: async (ctx, input) => {
     const plan = await ctx.runQuery(internal.integritySignals.evidencePlan, input);
+    if ("similarity" in plan) return { signal: plan.signal, similarity: plan.similarity };
     if (!plan.chunk || plan.signal.eventSequence === undefined) {
       return { signal: plan.signal };
     }
