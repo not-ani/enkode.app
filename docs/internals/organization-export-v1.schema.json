@@ -53,6 +53,7 @@
         "integritySignals",
         "grades",
         "gradeReturns",
+        "notifications",
         "auditEvents"
       ],
       "properties": {
@@ -83,6 +84,7 @@
         "integritySignals": { "$ref": "#/$defs/recordArray" },
         "grades": { "$ref": "#/$defs/recordArray" },
         "gradeReturns": { "$ref": "#/$defs/recordArray" },
+        "notifications": { "$ref": "#/$defs/recordArray" },
         "auditEvents": { "$ref": "#/$defs/recordArray" }
       }
     },

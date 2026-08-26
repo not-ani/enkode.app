@@ -25,8 +25,9 @@ checked against that Organization again before serialization.
 - `records` contains users, teaching assignments, Courses, Classrooms, Enrollments, all Assignment
   and Material Versions, source files and tests, releases and version adoptions, deadlines,
   Workspaces and merges, Runs, Submissions and snapshots, Grades and every returned revision,
-  Feedback, Integrity Signals (including similarity evidence), and Audit Events. Archived rows,
-  ended Enrollments, and retained earlier versions are intentionally not filtered out.
+  Feedback, Notifications (including read state), Integrity Signals (including similarity evidence),
+  and Audit Events. Archived rows, ended Enrollments, and retained earlier versions are intentionally
+  not filtered out.
 - `objects` contains material attachment bytes, every Work History chunk and referenced Work
   History snapshot, and every Submission snapshot. Objects use a content-addressed
   `objects/sha256/<digest>` path and base64 data. `sourceReferences` links the bytes back to the

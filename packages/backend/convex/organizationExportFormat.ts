@@ -31,6 +31,7 @@ export const organizationExportRecordNames = [
   "integritySignals",
   "grades",
   "gradeReturns",
+  "notifications",
   "auditEvents",
 ] as const;
 

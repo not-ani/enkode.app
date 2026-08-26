@@ -101,7 +101,7 @@ async function seed(test: ReturnType<typeof backend>) {
       organizationId,
       courseId,
       title: "Hello",
-      latestVersion: 2,
+      latestVersion: 5,
       archivedAt: 53,
       archivedBy: teacherId,
     });
@@ -127,6 +127,23 @@ async function seed(test: ReturnType<typeof backend>) {
       createdBy: teacherId,
       createdAt: 2,
     });
+    for (const [version, language, runtimeVersion, entrypoint] of [
+      [3, "javascript", "22.14.0", "main.js"],
+      [4, "typescript", "5.0.3", "main.ts"],
+      [5, "java", "15.0.2", "Main.java"],
+    ] as const) {
+      await ctx.db.insert("assignmentVersions", {
+        organizationId,
+        assignmentId,
+        version,
+        instructions: `${language} instructions`,
+        language,
+        runtimeVersion,
+        entrypoint,
+        createdBy: teacherId,
+        createdAt: version,
+      });
+    }
     await ctx.db.insert("assignmentStarterFiles", {
       organizationId,
       assignmentVersionId: firstVersionId,
@@ -258,6 +275,19 @@ async function seed(test: ReturnType<typeof backend>) {
       returnedAt: 10,
     });
     await ctx.db.patch(gradeId, { latestReturnId: gradeReturnId });
+    await ctx.db.insert("notifications", {
+      organizationId,
+      recipientId: studentId,
+      classroomId,
+      type: "grade_returned",
+      dedupeKey: `grade_returned:${gradeReturnId}`,
+      title: "Grade returned",
+      body: "Your grade is ready.",
+      assignmentReleaseId,
+      gradeReturnId,
+      createdAt: 10,
+      readAt: 11,
+    });
     await ctx.db.insert("integritySignals", {
       organizationId,
       workspaceId,
@@ -372,12 +402,25 @@ describe("Organization Export", () => {
       id: seeded.ids.courseId,
       archivedAt: 50,
     });
-    expect(bundle.records.assignmentVersions.map((version) => version.version)).toEqual([1, 2]);
+    expect(bundle.records.assignmentVersions.map((version) => version.version)).toEqual([
+      1, 2, 3, 4, 5,
+    ]);
+    expect(bundle.records.assignmentVersions.map((version) => version.language)).toEqual([
+      "python",
+      "python",
+      "javascript",
+      "typescript",
+      "java",
+    ]);
     expect(bundle.records.grades[0]).toMatchObject({
       id: seeded.ids.gradeId,
       overallFeedback: "Good work",
     });
     expect(bundle.records.gradeReturns).toHaveLength(1);
+    expect(bundle.records.notifications[0]).toMatchObject({
+      type: "grade_returned",
+      readAt: 11,
+    });
     expect(bundle.records.runs).toHaveLength(1);
     expect(bundle.records.materialReleases).toHaveLength(1);
     expect(bundle.records.integritySignals).toHaveLength(1);

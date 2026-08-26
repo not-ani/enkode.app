@@ -43,6 +43,7 @@ export const readOrganizationSnapshot = internalQuery({
       integritySignals,
       grades,
       gradeReturns,
+      notifications,
       auditEvents,
     ] = await Promise.all([
       scoped(
@@ -182,6 +183,11 @@ export const readOrganizationSnapshot = internalQuery({
       ),
       scoped(
         ctx.db
+          .query("notifications")
+          .withIndex("by_organization", (q) => q.eq("organizationId", organizationId)),
+      ),
+      scoped(
+        ctx.db
           .query("auditEvents")
           .withIndex("by_organization", (q) => q.eq("organizationId", organizationId)),
       ),
@@ -217,6 +223,7 @@ export const readOrganizationSnapshot = internalQuery({
         integritySignals,
         grades,
         gradeReturns,
+        notifications,
         auditEvents,
       },
     };

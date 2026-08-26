@@ -549,6 +549,7 @@ export default defineSchema({
     createdAt: v.number(),
     readAt: v.optional(v.number()),
   })
+    .index("by_organization", ["organizationId"])
     .index("by_recipient_created", ["recipientId", "createdAt"])
     .index("by_recipient_dedupe", ["recipientId", "dedupeKey"]),
 
