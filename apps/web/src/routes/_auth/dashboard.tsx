@@ -12,6 +12,7 @@ import AssignmentReleases, { StudentAssignmentReleases } from "@/components/assi
 import MaterialAuthoring from "@/components/material-authoring";
 import MaterialReleases, { StudentMaterials } from "@/components/material-releases";
 import LiveWorkspaces from "@/components/live-workspaces";
+import Grading from "@/components/grading";
 import StudentManagement from "@/components/student-management";
 import WorkHistoryList from "@/components/work-history-list";
 
@@ -229,6 +230,7 @@ function DashboardContent() {
         </div>
         <ClassroomEnrollments classrooms={classrooms} />
         <AssignmentReleases classrooms={classrooms} />
+        <Grading classrooms={classrooms} />
         <MaterialReleases classrooms={classrooms} />
         <LiveWorkspaces />
         <WorkHistoryList role="teacher" />

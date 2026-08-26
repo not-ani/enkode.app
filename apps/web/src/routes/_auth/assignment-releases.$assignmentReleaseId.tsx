@@ -29,6 +29,25 @@ type Workspace = {
   files: WorkspaceFile[];
 };
 
+type ReturnedGrade = {
+  status: "awaiting_submission" | "awaiting_review" | "returned";
+  returned: null | {
+    points: number;
+    proposedPoints: number;
+    overallFeedback?: string;
+    revision: number;
+    returnedAt: number;
+    inlineFeedback: {
+      path: string;
+      startLine: number;
+      startColumn: number;
+      endLine: number;
+      endColumn: number;
+      body: string;
+    }[];
+  };
+};
+
 function AssignmentWorkspaceRoute() {
   const { assignmentReleaseId } = Route.useParams();
   const release = useQuery(api.assignmentReleases.open, { assignmentReleaseId }) as
@@ -39,6 +58,7 @@ function AssignmentWorkspaceRoute() {
   const acceptHistoryChunk = useAction(api.workHistoryUpload.acceptChunk);
   const runWorkspace = useAction(api.runs.run);
   const submitWorkspace = useAction(api.submissionUpload.submit);
+  const grade = useQuery(api.grades.mine, { assignmentReleaseId }) as ReturnedGrade | undefined;
   const [workspace, setWorkspace] = useState<Workspace>();
   const [error, setError] = useState<string>();
   const submissions = useQuery(
@@ -131,6 +151,7 @@ function AssignmentWorkspaceRoute() {
             setWorkspace((current) => (current ? { ...current, files } : current));
           }}
         />
+        {grade ? <ReturnedGradeSummary grade={grade} /> : null}
         <p className="text-xs text-muted-foreground">
           Save stores your Workspace. Running and submitting are separate actions and are never
           triggered by saving.
@@ -144,5 +165,50 @@ function AssignmentWorkspaceRoute() {
         </Link>
       </div>
     </main>
+  );
+}
+
+function ReturnedGradeSummary({ grade }: { grade: ReturnedGrade }) {
+  return (
+    <section className="border-y border-foreground/10 py-4" aria-label="Grade and Feedback">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h2 className="font-medium">Grade and Feedback</h2>
+        <p className="text-sm capitalize text-muted-foreground">{grade.status.replace("_", " ")}</p>
+      </div>
+      {!grade.returned ? (
+        <p className="mt-2 text-sm text-muted-foreground">
+          Your teacher has not returned a Grade yet.
+        </p>
+      ) : (
+        <div className="mt-3 grid gap-3">
+          <p className="text-lg font-semibold tabular-nums">{grade.returned.points} points</p>
+          {grade.status === "awaiting_review" ? (
+            <p className="text-sm text-muted-foreground">
+              This is your currently returned Grade. Your newer Submission is awaiting review.
+            </p>
+          ) : null}
+          {grade.returned.overallFeedback ? (
+            <p className="whitespace-pre-wrap text-sm">{grade.returned.overallFeedback}</p>
+          ) : null}
+          {grade.returned.inlineFeedback.length > 0 ? (
+            <ul className="grid gap-2">
+              {grade.returned.inlineFeedback.map((feedback, index) => (
+                <li className="border border-foreground/10 p-3 text-sm" key={index}>
+                  <p className="font-mono text-xs text-muted-foreground">
+                    {feedback.path}:{feedback.startLine}:{feedback.startColumn}–{feedback.endLine}:
+                    {feedback.endColumn}
+                  </p>
+                  <p className="mt-1">{feedback.body}</p>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+          <p className="text-xs text-muted-foreground">
+            Revision {grade.returned.revision} · Returned{" "}
+            {new Date(grade.returned.returnedAt).toLocaleString()}
+          </p>
+        </div>
+      )}
+    </section>
   );
 }
