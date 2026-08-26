@@ -24,7 +24,11 @@ type Release = {
   scheduledFor?: number;
   publishedAt?: number;
   submissionLimit?: number;
+  deadlinePolicy: DeadlinePolicy;
+  deadlineAt?: number;
 };
+type DeadlinePolicy = "no_deadline" | "accept_late" | "hard_close";
+type Enrollment = { studentId: string; displayName: string; status: "active" | "ended" };
 
 function messageFrom(error: unknown) {
   return error instanceof Error ? error.message : "Could not release this Assignment";
@@ -50,6 +54,7 @@ export default function AssignmentReleases({ classrooms }: { classrooms: Classro
   const [publicationMode, setPublicationMode] = useState<"immediate" | "draft" | "scheduled">(
     "immediate",
   );
+  const [deadlineMode, setDeadlineMode] = useState<DeadlinePolicy>("no_deadline");
   const [error, setError] = useState<string>();
   const [saving, setSaving] = useState(false);
   const available = versions?.filter(
@@ -73,9 +78,18 @@ export default function AssignmentReleases({ classrooms }: { classrooms: Classro
                 scheduledFor: new Date(String(form.get("scheduledFor"))).getTime(),
               }
             : publicationMode,
+        deadlinePolicy: deadlineMode,
+        deadlineAt:
+          deadlineMode === "no_deadline"
+            ? undefined
+            : new Date(String(form.get("deadlineAt"))).getTime(),
+        submissionLimit: form.get("submissionLimit")
+          ? Number(form.get("submissionLimit"))
+          : undefined,
       });
       event.currentTarget.reset();
       setPublicationMode("immediate");
+      setDeadlineMode("no_deadline");
     } catch (caught) {
       setError(messageFrom(caught));
     } finally {
@@ -218,6 +232,30 @@ export default function AssignmentReleases({ classrooms }: { classrooms: Classro
                 </span>
               </label>
             ) : null}
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+              <label className="flex flex-col gap-1.5 text-base sm:text-sm">
+                Deadline policy
+                <select
+                  value={deadlineMode}
+                  onChange={(event) => setDeadlineMode(event.target.value as DeadlinePolicy)}
+                  className="border-input bg-background h-10 border px-2.5 text-base sm:h-8 sm:text-xs"
+                >
+                  <option value="no_deadline">No Deadline</option>
+                  <option value="accept_late">Accept and mark late</option>
+                  <option value="hard_close">Hard close</option>
+                </select>
+              </label>
+              {deadlineMode !== "no_deadline" ? (
+                <label className="flex flex-col gap-1.5 text-base sm:text-sm">
+                  Deadline
+                  <Input name="deadlineAt" type="datetime-local" required />
+                </label>
+              ) : null}
+              <label className="flex flex-col gap-1.5 text-base sm:text-sm">
+                Attempt limit
+                <Input name="submissionLimit" type="number" min="1" placeholder="Unlimited" />
+              </label>
+            </div>
             <Button type="submit" className="self-start" disabled={saving || !available?.length}>
               {saving
                 ? "Saving…"
@@ -254,7 +292,11 @@ export default function AssignmentReleases({ classrooms }: { classrooms: Classro
                         ·{" "}
                         {release.submissionLimit === undefined
                           ? "Unlimited submissions"
-                          : `${release.submissionLimit} submissions`}
+                          : `${release.submissionLimit} submissions`}{" "}
+                        ·{" "}
+                        {release.deadlineAt === undefined
+                          ? "No Deadline"
+                          : `${release.deadlinePolicy === "hard_close" ? "Hard close" : "Late submissions accepted"} ${new Date(release.deadlineAt).toLocaleString([], { timeZoneName: "short" })}`}
                       </p>
                     </div>
                     <div className="flex shrink-0 gap-1">
@@ -328,6 +370,7 @@ export default function AssignmentReleases({ classrooms }: { classrooms: Classro
                     </div>
                   ) : null}
                   <VersionAdoption release={release} versions={versions ?? []} />
+                  <ReleasePolicyEditor release={release} classroomId={selectedClassroomId} />
                 </li>
               ))}
             </ol>
@@ -495,7 +538,13 @@ function VersionAdoption({ release, versions }: { release: Release; versions: Ve
   );
 }
 
-type StudentRelease = Release & { classroomName: string; runtimeVersion: string };
+type StudentRelease = Release & {
+  classroomName: string;
+  runtimeVersion: string;
+  effectiveDeadline: { deadlineAt?: number };
+  submissionEligibility: { canSubmit: boolean; reason?: string; remainingAttempts?: number };
+  deadlineFacts: { missing: boolean; late: boolean };
+};
 
 export function StudentAssignmentReleases() {
   const releases = useQuery(api.assignmentReleases.listMine) as StudentRelease[] | undefined;
@@ -522,11 +571,164 @@ export function StudentAssignmentReleases() {
                 <span className="text-muted-foreground block text-base sm:text-sm">
                   {release.classroomName} · {release.points} points · Version {release.version}
                 </span>
+                <span className="text-muted-foreground block text-sm">
+                  {release.effectiveDeadline.deadlineAt === undefined
+                    ? "No Deadline"
+                    : `Due ${new Date(release.effectiveDeadline.deadlineAt).toLocaleString([], { timeZoneName: "short" })}`}
+                  {release.submissionEligibility.remainingAttempts === undefined
+                    ? " · Unlimited attempts"
+                    : ` · ${release.submissionEligibility.remainingAttempts} attempts remaining`}
+                  {release.deadlineFacts.missing ? " · Missing" : ""}
+                  {release.deadlineFacts.late ? " · Late" : ""}
+                </span>
               </Link>
             </li>
           ))}
         </ul>
       )}
     </section>
+  );
+}
+
+function ReleasePolicyEditor({ release, classroomId }: { release: Release; classroomId: string }) {
+  const enrollments = useQuery(api.enrollments.listForClassroom, { classroomId }) as
+    | Enrollment[]
+    | undefined;
+  const exceptions = useQuery(api.assignmentReleases.listDeadlineExceptions, {
+    assignmentReleaseId: release._id,
+  }) as
+    | {
+        _id: string;
+        studentId: string;
+        studentName: string;
+        deadlinePolicy: DeadlinePolicy;
+        deadlineAt?: number;
+      }[]
+    | undefined;
+  const configure = useMutation(api.assignmentReleases.configureSubmissionPolicy);
+  const setException = useMutation(api.assignmentReleases.setDeadlineException);
+  const removeException = useMutation(api.assignmentReleases.removeDeadlineException);
+  const [policy, setPolicy] = useState(release.deadlinePolicy);
+  const [exceptionPolicy, setExceptionPolicy] = useState<DeadlinePolicy>("accept_late");
+
+  async function savePolicy(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    await configure({
+      assignmentReleaseId: release._id,
+      deadlinePolicy: policy,
+      deadlineAt:
+        policy === "no_deadline" ? undefined : new Date(String(form.get("deadlineAt"))).getTime(),
+      submissionLimit: form.get("submissionLimit")
+        ? Number(form.get("submissionLimit"))
+        : undefined,
+    });
+  }
+
+  async function saveException(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    await setException({
+      assignmentReleaseId: release._id,
+      studentId: String(form.get("studentId")),
+      deadlinePolicy: exceptionPolicy,
+      deadlineAt:
+        exceptionPolicy === "no_deadline"
+          ? undefined
+          : new Date(String(form.get("deadlineAt"))).getTime(),
+    });
+    event.currentTarget.reset();
+  }
+
+  return (
+    <details className="border-t border-foreground/10 pt-3">
+      <summary className="cursor-pointer text-sm font-medium">
+        Deadline and attempt settings
+      </summary>
+      <div className="mt-3 grid gap-4 lg:grid-cols-2">
+        <form className="grid gap-2" onSubmit={(event) => void savePolicy(event)}>
+          <select
+            value={policy}
+            onChange={(event) => setPolicy(event.target.value as DeadlinePolicy)}
+            className="border-input bg-background h-8 border px-2 text-xs"
+          >
+            <option value="no_deadline">No Deadline</option>
+            <option value="accept_late">Accept and mark late</option>
+            <option value="hard_close">Hard close</option>
+          </select>
+          {policy !== "no_deadline" ? (
+            <Input name="deadlineAt" type="datetime-local" required />
+          ) : null}
+          <Input
+            name="submissionLimit"
+            type="number"
+            min="1"
+            defaultValue={release.submissionLimit}
+            placeholder="Unlimited attempts"
+          />
+          <Button type="submit" size="sm" variant="outline" className="justify-self-start">
+            Save release policy
+          </Button>
+        </form>
+        <form className="grid gap-2" onSubmit={(event) => void saveException(event)}>
+          <select
+            name="studentId"
+            required
+            className="border-input bg-background h-8 border px-2 text-xs"
+          >
+            <option value="">Choose a Student</option>
+            {enrollments
+              ?.filter(({ status }) => status === "active")
+              .map((enrollment) => (
+                <option key={enrollment.studentId} value={enrollment.studentId}>
+                  {enrollment.displayName}
+                </option>
+              ))}
+          </select>
+          <select
+            value={exceptionPolicy}
+            onChange={(event) => setExceptionPolicy(event.target.value as DeadlinePolicy)}
+            className="border-input bg-background h-8 border px-2 text-xs"
+          >
+            <option value="no_deadline">No Deadline</option>
+            <option value="accept_late">Accept and mark late</option>
+            <option value="hard_close">Hard close</option>
+          </select>
+          {exceptionPolicy !== "no_deadline" ? (
+            <Input name="deadlineAt" type="datetime-local" required />
+          ) : null}
+          <Button type="submit" size="sm" variant="outline" className="justify-self-start">
+            Save Deadline Exception
+          </Button>
+        </form>
+      </div>
+      {exceptions?.length ? (
+        <ul className="mt-3 grid gap-1 text-sm text-muted-foreground">
+          {exceptions.map((exception) => (
+            <li key={exception._id} className="flex items-center justify-between gap-3">
+              <span>
+                {exception.studentName} · {exception.deadlinePolicy.replaceAll("_", " ")}
+                {exception.deadlineAt
+                  ? ` · ${new Date(exception.deadlineAt).toLocaleString()}`
+                  : ""}
+              </span>
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                onClick={() =>
+                  void removeException({
+                    assignmentReleaseId: release._id,
+                    studentId: exception.studentId,
+                  })
+                }
+              >
+                Remove
+              </Button>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </details>
   );
 }

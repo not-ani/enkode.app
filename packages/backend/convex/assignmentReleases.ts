@@ -9,6 +9,13 @@ import { mergePlan } from "./assignmentVersionMerge";
 import { appendAuditEvent } from "./audit";
 import { requireClassroomTeacher, requireRole } from "./authorization";
 import {
+  deriveDeadlineFacts,
+  effectiveDeadline,
+  submissionEligibility,
+  validateDeadlineConfiguration,
+  validateSubmissionLimit,
+} from "./deadlinePolicy";
+import {
   isArchived,
   requireWritableAssignment,
   requireWritableAssignmentRelease,
@@ -25,6 +32,11 @@ const publication = v.union(
   v.literal("immediate"),
   v.literal("draft"),
   v.object({ mode: v.literal("scheduled"), scheduledFor: v.number() }),
+);
+const deadlinePolicy = v.union(
+  v.literal("no_deadline"),
+  v.literal("accept_late"),
+  v.literal("hard_close"),
 );
 
 async function requireActiveEnrollment(
@@ -56,6 +68,45 @@ async function releaseSummary(ctx: QueryCtx, release: Doc<"assignmentReleases">)
     language: version.language,
     runtimeVersion: version.runtimeVersion,
     publicationStatus: releasePublicationStatus(release),
+    deadlinePolicy: release.deadlinePolicy ?? "no_deadline",
+  };
+}
+
+async function studentDeadlineSummary(
+  ctx: QueryCtx,
+  release: Doc<"assignmentReleases">,
+  studentId: Id<"users">,
+  now = Date.now(),
+) {
+  const [exception, submissions] = await Promise.all([
+    ctx.db
+      .query("deadlineExceptions")
+      .withIndex("by_release_student", (index) =>
+        index.eq("assignmentReleaseId", release._id).eq("studentId", studentId),
+      )
+      .unique(),
+    ctx.db
+      .query("submissions")
+      .withIndex("by_release_student_attempt", (index) =>
+        index.eq("assignmentReleaseId", release._id).eq("studentId", studentId),
+      )
+      .collect(),
+  ]);
+  const deadline = effectiveDeadline(release, exception);
+  return {
+    effectiveDeadline: deadline,
+    submissionEligibility: submissionEligibility({
+      ...deadline,
+      submissionLimit: release.submissionLimit,
+      attemptsUsed: submissions.length,
+      now,
+    }),
+    deadlineFacts: deriveDeadlineFacts({
+      deadlineAt: deadline.deadlineAt,
+      attemptsUsed: submissions.length,
+      hasLateSubmission: submissions.some(({ late }) => late === true),
+      now,
+    }),
   };
 }
 
@@ -147,8 +198,18 @@ export const create = mutation({
     assignmentVersionId: v.id("assignmentVersions"),
     points: v.number(),
     publication: v.optional(publication),
+    deadlinePolicy: v.optional(deadlinePolicy),
+    deadlineAt: v.optional(v.number()),
+    submissionLimit: v.optional(v.number()),
   },
-  handler: async (ctx, { classroomId, assignmentVersionId, points, publication = "immediate" }) => {
+  handler: async (ctx, input) => {
+    const {
+      classroomId,
+      assignmentVersionId,
+      points,
+      publication = "immediate",
+      submissionLimit: requestedLimit,
+    } = input;
     const { classroom, organization, user } = await requireClassroomTeacher(ctx, classroomId);
     await requireWritableClassroom(ctx, classroomId);
     const version = await ctx.db.get(assignmentVersionId);
@@ -183,6 +244,7 @@ export const create = mutation({
         : publication === "draft"
           ? ("draft" as const)
           : ("scheduled" as const);
+    const deadline = validateDeadlineConfiguration(input);
     const releaseId = await ctx.db.insert("assignmentReleases", {
       organizationId: organization._id,
       classroomId,
@@ -194,6 +256,8 @@ export const create = mutation({
       scheduledFor,
       scheduledBy: scheduledFor === undefined ? undefined : user._id,
       publishedAt: publicationState === "published" ? now : undefined,
+      ...deadline,
+      submissionLimit: validateSubmissionLimit(requestedLimit),
       createdBy: user._id,
       createdAt: now,
     });
@@ -221,6 +285,132 @@ export const create = mutation({
       });
     }
     return releaseId;
+  },
+});
+
+export const configureSubmissionPolicy = mutation({
+  args: {
+    assignmentReleaseId: v.id("assignmentReleases"),
+    deadlinePolicy,
+    deadlineAt: v.optional(v.number()),
+    submissionLimit: v.optional(v.number()),
+  },
+  handler: async (ctx, input) => {
+    const { release, user } = await requireEditableRelease(ctx, input.assignmentReleaseId);
+    const deadline = validateDeadlineConfiguration(input);
+    const submissionLimit = validateSubmissionLimit(input.submissionLimit);
+    if (
+      (release.deadlinePolicy ?? "no_deadline") === deadline.deadlinePolicy &&
+      release.deadlineAt === deadline.deadlineAt &&
+      release.submissionLimit === submissionLimit
+    ) {
+      return;
+    }
+    await ctx.db.patch(release._id, { ...deadline, submissionLimit });
+    await auditRelease(ctx, release, user._id, "assignment_release.submission_policy_changed");
+  },
+});
+
+export const setDeadlineException = mutation({
+  args: {
+    assignmentReleaseId: v.id("assignmentReleases"),
+    studentId: v.id("users"),
+    deadlinePolicy,
+    deadlineAt: v.optional(v.number()),
+  },
+  handler: async (ctx, input) => {
+    const { release, organization, user } = await requireEditableRelease(
+      ctx,
+      input.assignmentReleaseId,
+    );
+    const student = await ctx.db.get(input.studentId);
+    if (!student || student.organizationId !== organization._id || student.role !== "student") {
+      throw new ConvexError("Student not found in this organization");
+    }
+    const enrollment = await ctx.db
+      .query("enrollments")
+      .withIndex("by_classroom_student", (index) =>
+        index.eq("classroomId", release.classroomId).eq("studentId", student._id),
+      )
+      .unique();
+    if (!enrollment) throw new ConvexError("Student is not enrolled in this Classroom");
+    const deadline = validateDeadlineConfiguration(input);
+    const existing = await ctx.db
+      .query("deadlineExceptions")
+      .withIndex("by_release_student", (index) =>
+        index.eq("assignmentReleaseId", release._id).eq("studentId", student._id),
+      )
+      .unique();
+    const now = Date.now();
+    if (
+      existing &&
+      existing.deadlinePolicy === deadline.deadlinePolicy &&
+      existing.deadlineAt === deadline.deadlineAt
+    ) {
+      return existing._id;
+    }
+    let exceptionId: Id<"deadlineExceptions">;
+    if (existing) {
+      await ctx.db.patch(existing._id, { ...deadline, updatedBy: user._id, updatedAt: now });
+      exceptionId = existing._id;
+    } else {
+      exceptionId = await ctx.db.insert("deadlineExceptions", {
+        organizationId: organization._id,
+        assignmentReleaseId: release._id,
+        studentId: student._id,
+        ...deadline,
+        updatedBy: user._id,
+        createdAt: now,
+        updatedAt: now,
+      });
+    }
+    await appendAuditEvent(ctx, {
+      organizationId: organization._id,
+      actor: { kind: "user", userId: user._id },
+      action: existing ? "deadline_exception.changed" : "deadline_exception.created",
+      target: { kind: "deadline_exception", id: exceptionId },
+    });
+    return exceptionId;
+  },
+});
+
+export const removeDeadlineException = mutation({
+  args: { assignmentReleaseId: v.id("assignmentReleases"), studentId: v.id("users") },
+  handler: async (ctx, { assignmentReleaseId, studentId }) => {
+    const { organization, user } = await requireEditableRelease(ctx, assignmentReleaseId);
+    const existing = await ctx.db
+      .query("deadlineExceptions")
+      .withIndex("by_release_student", (index) =>
+        index.eq("assignmentReleaseId", assignmentReleaseId).eq("studentId", studentId),
+      )
+      .unique();
+    if (!existing) return;
+    await ctx.db.delete(existing._id);
+    await appendAuditEvent(ctx, {
+      organizationId: organization._id,
+      actor: { kind: "user", userId: user._id },
+      action: "deadline_exception.removed",
+      target: { kind: "deadline_exception", id: existing._id },
+    });
+  },
+});
+
+export const listDeadlineExceptions = query({
+  args: { assignmentReleaseId: v.id("assignmentReleases") },
+  handler: async (ctx, { assignmentReleaseId }) => {
+    const release = await ctx.db.get(assignmentReleaseId);
+    if (!release) throw new ConvexError("Assignment Release not found");
+    await requireClassroomTeacher(ctx, release.classroomId);
+    const exceptions = await ctx.db
+      .query("deadlineExceptions")
+      .withIndex("by_release", (index) => index.eq("assignmentReleaseId", assignmentReleaseId))
+      .collect();
+    return await Promise.all(
+      exceptions.map(async (exception) => ({
+        ...exception,
+        studentName: (await ctx.db.get(exception.studentId))?.displayName ?? "Student",
+      })),
+    );
   },
 });
 
@@ -484,6 +674,7 @@ export const listMine = query({
           published.map(async (release) => ({
             ...(await releaseSummary(ctx, release)),
             classroomName: classroom.name,
+            ...(await studentDeadlineSummary(ctx, release, user._id)),
           })),
         );
       }),
@@ -524,6 +715,7 @@ export const open = query({
     if (!version) throw new ConvexError("Assignment Release content is unavailable");
     return {
       ...summary,
+      ...(await studentDeadlineSummary(ctx, release, user._id)),
       instructions: version.instructions,
       entrypoint: version.entrypoint,
       starterFiles,

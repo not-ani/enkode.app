@@ -68,6 +68,11 @@ type WorkspaceEditorProps = {
     decisions: StarterFileDecision[],
     requiredHistorySequence: number,
   ) => Promise<void>;
+  submissionEligibility?: {
+    canSubmit: boolean;
+    reason?: string;
+    remainingAttempts?: number;
+  };
 };
 
 export type RunResult = {
@@ -92,6 +97,7 @@ export type SubmissionResult = {
   attemptNumber: number;
   proposedPoints: number;
   submittedAt: number;
+  late?: boolean;
   current?: boolean;
   testResults: {
     visibility: "public" | "hidden";
@@ -115,6 +121,7 @@ export default function WorkspaceEditor({
   submissions,
   versionMerge,
   onCompleteVersionMerge,
+  submissionEligibility = { canSubmit: true },
 }: WorkspaceEditorProps) {
   const draftStore = useMemo(
     () =>
@@ -449,7 +456,10 @@ export default function WorkspaceEditor({
                 size="sm"
                 variant="outline"
                 disabled={
-                  submitState === "submitting" || runState === "running" || saveState === "saving"
+                  !submissionEligibility.canSubmit ||
+                  submitState === "submitting" ||
+                  runState === "running" ||
+                  saveState === "saving"
                 }
                 onClick={() => void submit()}
               >
@@ -468,6 +478,11 @@ export default function WorkspaceEditor({
           {error ? (
             <p className="border-b border-foreground/10 px-3 py-2 text-sm text-destructive">
               {error}
+            </p>
+          ) : null}
+          {!submissionEligibility.canSubmit && submissionEligibility.reason ? (
+            <p className="border-b border-foreground/10 px-3 py-2 text-sm text-muted-foreground">
+              Submit unavailable: {submissionEligibility.reason}.
             </p>
           ) : null}
           <div className="min-h-0 flex-1">
@@ -599,7 +614,10 @@ function SubmissionResults({ result }: { result: SubmissionResult }) {
       aria-label="Submission results"
     >
       <h2 className="font-medium">Attempt {result.attemptNumber} submitted</h2>
-      <p className="mt-1 text-sm text-muted-foreground">Proposed points: {result.proposedPoints}</p>
+      <p className="mt-1 text-sm text-muted-foreground">
+        Proposed points: {result.proposedPoints}
+        {result.late ? " · Late" : ""}
+      </p>
       <ul className="mt-3 grid gap-2">
         {result.testResults.map((test, index) => (
           <li
@@ -631,6 +649,7 @@ function SubmissionHistory({ submissions }: { submissions: SubmissionResult[] })
         {submissions.map((submission) => (
           <li key={submission._id}>
             Attempt {submission.attemptNumber} · {submission.proposedPoints} proposed points
+            {submission.late ? " · Late" : ""}
             {submission.current ? " · Current" : ""}
           </li>
         ))}

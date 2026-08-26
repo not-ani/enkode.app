@@ -23,6 +23,12 @@ type Release = {
   runtimeVersion: string;
   entrypoint: string;
   version: number;
+  effectiveDeadline: {
+    deadlinePolicy: "no_deadline" | "accept_late" | "hard_close";
+    deadlineAt?: number;
+  };
+  submissionEligibility: { canSubmit: boolean; reason?: string; remainingAttempts?: number };
+  deadlineFacts: { missing: boolean; late: boolean };
 };
 
 type Workspace = {
@@ -142,6 +148,23 @@ function AssignmentWorkspaceRoute() {
           </p>
         </details>
         <WorkspaceViewers workspaceId={workspace._id} />
+        <section className="flex flex-wrap gap-x-5 gap-y-1 border-y border-foreground/10 py-3 text-sm">
+          <span>
+            Deadline:{" "}
+            {release.effectiveDeadline.deadlineAt === undefined
+              ? "None"
+              : new Date(release.effectiveDeadline.deadlineAt).toLocaleString([], {
+                  timeZoneName: "short",
+                })}
+          </span>
+          {release.submissionEligibility.remainingAttempts !== undefined ? (
+            <span>{release.submissionEligibility.remainingAttempts} attempts remaining</span>
+          ) : (
+            <span>Unlimited attempts</span>
+          )}
+          {release.deadlineFacts.missing ? <span className="text-destructive">Missing</span> : null}
+          {release.deadlineFacts.late ? <span>Late Submission recorded</span> : null}
+        </section>
         <WorkspaceEditor
           assignmentReleaseId={assignmentReleaseId}
           workspaceId={workspace._id}
@@ -167,6 +190,7 @@ function AssignmentWorkspaceRoute() {
             (await runWorkspace({ workspaceId: workspace._id, files })) as RunResult
           }
           submissions={submissions ?? []}
+          submissionEligibility={release.submissionEligibility}
           onSubmit={async (files, requiredHistorySequence, idempotencyKey) =>
             (await submitWorkspace({
               workspaceId: workspace._id,

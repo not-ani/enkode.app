@@ -9,6 +9,11 @@ const releasePublicationState = v.union(
   v.literal("scheduled"),
   v.literal("published"),
 );
+const deadlinePolicy = v.union(
+  v.literal("no_deadline"),
+  v.literal("accept_late"),
+  v.literal("hard_close"),
+);
 const materialKind = v.union(v.literal("rich_text"), v.literal("file"), v.literal("external_link"));
 const integritySignalType = v.union(
   v.literal("large_paste"),
@@ -193,6 +198,8 @@ export default defineSchema({
     scheduledFor: v.optional(v.number()),
     scheduledBy: v.optional(v.id("users")),
     publishedAt: v.optional(v.number()),
+    deadlinePolicy: v.optional(deadlinePolicy),
+    deadlineAt: v.optional(v.number()),
     submissionLimit: v.optional(v.number()),
     createdBy: v.id("users"),
     createdAt: v.number(),
@@ -208,6 +215,19 @@ export default defineSchema({
     adoptedBy: v.id("users"),
     adoptedAt: v.number(),
   }).index("by_release", ["assignmentReleaseId", "adoptedAt"]),
+
+  deadlineExceptions: defineTable({
+    organizationId: v.id("organizations"),
+    assignmentReleaseId: v.id("assignmentReleases"),
+    studentId: v.id("users"),
+    deadlinePolicy,
+    deadlineAt: v.optional(v.number()),
+    updatedBy: v.id("users"),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_release", ["assignmentReleaseId"])
+    .index("by_release_student", ["assignmentReleaseId", "studentId"]),
 
   materialReleases: defineTable({
     organizationId: v.id("organizations"),
@@ -377,6 +397,8 @@ export default defineSchema({
       }),
     ),
     proposedPoints: v.number(),
+    late: v.optional(v.boolean()),
+    effectiveDeadlineAt: v.optional(v.number()),
     submittedAt: v.number(),
   })
     .index("by_workspace_attempt", ["workspaceId", "attemptNumber"])

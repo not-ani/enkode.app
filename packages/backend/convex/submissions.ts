@@ -4,6 +4,7 @@ import type { Doc } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
 import { internalMutation, internalQuery, query } from "./_generated/server";
 import { requireClassroomTeacher, requireRole } from "./authorization";
+import { effectiveDeadline, submissionEligibility } from "./deadlinePolicy";
 import { requireWritableAssignmentRelease } from "./lifecycleGuards";
 import { releasePublicationStatus } from "./releasePolicy";
 
@@ -49,6 +50,31 @@ function studentVisible(submission: Doc<"submissions">) {
             ...(result.guidance === undefined ? {} : { guidance: result.guidance }),
           },
     ),
+  };
+}
+
+async function eligibilityFor(
+  ctx: Parameters<typeof requireRole>[0],
+  release: Doc<"assignmentReleases">,
+  studentId: Doc<"users">["_id"],
+  attemptsUsed: number,
+  now = Date.now(),
+) {
+  const exception = await ctx.db
+    .query("deadlineExceptions")
+    .withIndex("by_release_student", (index) =>
+      index.eq("assignmentReleaseId", release._id).eq("studentId", studentId),
+    )
+    .unique();
+  const deadline = effectiveDeadline(release, exception);
+  return {
+    deadline,
+    eligibility: submissionEligibility({
+      ...deadline,
+      submissionLimit: release.submissionLimit,
+      attemptsUsed,
+      now,
+    }),
   };
 }
 
@@ -114,6 +140,14 @@ export const prepare = internalQuery({
       )
       .unique();
     if (!enrollment || enrollment.status !== "active") throw new ConvexError("Forbidden");
+    const attempts = await ctx.db
+      .query("submissions")
+      .withIndex("by_workspace_attempt", (index) => index.eq("workspaceId", workspace._id))
+      .collect();
+    const { eligibility } = await eligibilityFor(ctx, release, user._id, attempts.length);
+    if (!eligibility.canSubmit) {
+      throw new ConvexError(eligibility.reason ?? "Submission is unavailable");
+    }
     const tests = await ctx.db
       .query("evaluationTests")
       .withIndex("by_version", (index) => index.eq("assignmentVersionId", version._id))
@@ -168,7 +202,6 @@ export const record = internalMutation({
     if (!workspace || workspace.studentId !== user._id || input.studentId !== user._id) {
       throw new ConvexError("Forbidden");
     }
-    await requireWritableAssignmentRelease(ctx, input.assignmentReleaseId);
     const existing = await ctx.db
       .query("submissions")
       .withIndex("by_workspace_idempotency", (index) =>
@@ -176,11 +209,36 @@ export const record = internalMutation({
       )
       .unique();
     if (existing) return studentVisible(existing);
+    await requireWritableAssignmentRelease(ctx, input.assignmentReleaseId);
+    const release = await ctx.db.get(workspace.assignmentReleaseId);
+    if (
+      !release ||
+      release._id !== input.assignmentReleaseId ||
+      release.organizationId !== input.organizationId ||
+      workspace.assignmentVersionId !== input.assignmentVersionId ||
+      workspace.organizationId !== input.organizationId
+    ) {
+      throw new ConvexError("Workspace Assignment Version is unavailable");
+    }
     const attempts = await ctx.db
       .query("submissions")
-      .withIndex("by_workspace_attempt", (index) => index.eq("workspaceId", workspace._id))
+      .withIndex("by_release_student_attempt", (index) =>
+        index
+          .eq("assignmentReleaseId", release._id)
+          .eq("studentId", user._id),
+      )
       .collect();
     const now = Date.now();
+    const { deadline, eligibility } = await eligibilityFor(
+      ctx,
+      release,
+      user._id,
+      attempts.length,
+      now,
+    );
+    if (!eligibility.canSubmit) {
+      throw new ConvexError(eligibility.reason ?? "Submission is unavailable");
+    }
     const snapshotId = await ctx.db.insert("submissionSnapshots", {
       organizationId: input.organizationId,
       workspaceId: input.workspaceId,
@@ -203,6 +261,8 @@ export const record = internalMutation({
       execution: input.execution,
       testResults: input.testResults,
       proposedPoints: input.proposedPoints,
+      late: eligibility.late,
+      effectiveDeadlineAt: deadline.deadlineAt,
       submittedAt: now,
     });
     await ctx.scheduler.runAfter(0, internal.submissionSimilarity.compare, { submissionId });
