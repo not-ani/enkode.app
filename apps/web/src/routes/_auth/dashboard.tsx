@@ -15,6 +15,7 @@ import LiveWorkspaces from "@/components/live-workspaces";
 import Grading from "@/components/grading";
 import StudentManagement from "@/components/student-management";
 import WorkHistoryList from "@/components/work-history-list";
+import ArchiveActions from "@/components/archive-actions";
 
 export const Route = createFileRoute("/_auth/dashboard")({ component: DashboardContent });
 
@@ -42,6 +43,14 @@ function DashboardContent() {
   const courses = useQuery(api.courses.listMine, teacherQuery) as CourseSummary[] | undefined;
   const classrooms = useQuery(api.classrooms.listMine, teacherQuery) as
     | ClassroomSummary[]
+    | undefined;
+  const archived = useQuery(api.archive.listArchived, teacherQuery) as
+    | {
+        assignments: { _id: string; title: string; archivedAt: number }[];
+        courses: { _id: string; name: string; archivedAt: number }[];
+        classrooms: { _id: string; name: string; archivedAt: number }[];
+        materials: { _id: string; title: string; archivedAt: number }[];
+      }
     | undefined;
   const createCourse = useMutation(api.courses.create);
   const createClassroom = useMutation(api.classrooms.create);
@@ -234,9 +243,45 @@ function DashboardContent() {
         <MaterialReleases classrooms={classrooms} />
         <LiveWorkspaces />
         <WorkHistoryList role="teacher" />
+        {archived ? <ArchivedTeaching items={archived} /> : null}
         <StudentManagement />
       </div>
     </main>
+  );
+}
+
+function ArchivedTeaching({
+  items,
+}: {
+  items: {
+    assignments: { _id: string; title: string; archivedAt: number }[];
+    courses: { _id: string; name: string; archivedAt: number }[];
+    classrooms: { _id: string; name: string; archivedAt: number }[];
+    materials: { _id: string; title: string; archivedAt: number }[];
+  };
+}) {
+  const rows = [
+    ...items.courses.map((item) => ({ ...item, label: item.name, kind: "Course" })),
+    ...items.classrooms.map((item) => ({ ...item, label: item.name, kind: "Classroom" })),
+    ...items.assignments.map((item) => ({ ...item, label: item.title, kind: "Assignment" })),
+    ...items.materials.map((item) => ({ ...item, label: item.title, kind: "Material" })),
+  ].sort((left, right) => right.archivedAt - left.archivedAt);
+  if (rows.length === 0) return null;
+  return (
+    <details className="border-y border-foreground/10 py-5">
+      <summary className="cursor-pointer font-medium">Archived teaching</summary>
+      <p className="text-muted-foreground mt-2 text-sm">
+        Archived items are read-only. Academic records remain available in grading and Work History.
+      </p>
+      <ul className="mt-4 grid gap-2 sm:grid-cols-2" role="list">
+        {rows.map((item) => (
+          <li className="bg-muted/50 flex items-baseline justify-between gap-3 p-3" key={item._id}>
+            <span className="truncate text-sm">{item.label}</span>
+            <span className="text-muted-foreground text-xs">{item.kind}</span>
+          </li>
+        ))}
+      </ul>
+    </details>
   );
 }
 
@@ -310,6 +355,7 @@ function TeachingList(
                   kind={isCourse ? "course" : "classroom"}
                   assignments={assignments}
                 />
+                <ArchiveActions id={item._id} target={isCourse ? "course" : "classroom"} />
                 {isCourse ? (
                   <>
                     <AssignmentAuthoring courseId={item._id} />

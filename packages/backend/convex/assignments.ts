@@ -6,6 +6,7 @@ import { mutation, query } from "./_generated/server";
 import { validateEvaluationTest, validateFilePath } from "./assignmentPolicy";
 import { appendAuditEvent } from "./audit";
 import { requireCourseCollaborator } from "./authorization";
+import { requireWritableAssignment, requireWritableCourse } from "./lifecycleGuards";
 import { maintainedPythonRuntime, requireMaintainedPythonRuntime } from "./runtimeCatalog";
 
 const starterFile = v.object({ path: v.string(), content: v.string() });
@@ -150,6 +151,7 @@ export const create = mutation({
   args: { courseId: v.id("courses"), title: v.string(), ...versionFields },
   handler: async (ctx, { courseId, title, ...versionInput }) => {
     const { organization, user } = await requireCourseCollaborator(ctx, courseId);
+    await requireWritableCourse(ctx, courseId);
     const assignmentId = await ctx.db.insert("assignments", {
       organizationId: organization._id,
       courseId,
@@ -178,8 +180,7 @@ export const create = mutation({
 export const createVersion = mutation({
   args: { assignmentId: v.id("assignments"), ...versionFields },
   handler: async (ctx, { assignmentId, ...versionInput }) => {
-    const assignment = await ctx.db.get(assignmentId);
-    if (!assignment) throw new ConvexError("Assignment not found");
+    const assignment = await requireWritableAssignment(ctx, assignmentId);
     const { organization, user } = await requireCourseCollaborator(ctx, assignment.courseId);
     const assignmentVersionId = await insertVersion(ctx, assignment, user._id, versionInput);
     await appendAuditEvent(ctx, {
@@ -196,10 +197,11 @@ export const listByCourse = query({
   args: { courseId: v.id("courses") },
   handler: async (ctx, { courseId }) => {
     await requireCourseCollaborator(ctx, courseId);
-    return await ctx.db
+    const assignments = await ctx.db
       .query("assignments")
       .withIndex("by_course", (index) => index.eq("courseId", courseId))
       .collect();
+    return assignments.filter(({ archivedAt }) => archivedAt === undefined);
   },
 });
 

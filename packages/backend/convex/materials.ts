@@ -5,6 +5,7 @@ import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { mutation, query } from "./_generated/server";
 import { appendAuditEvent } from "./audit";
 import { requireCourseCollaborator } from "./authorization";
+import { requireWritableCourse, requireWritableMaterial } from "./lifecycleGuards";
 import { configuredObjectStorage, storedObjectReceipt } from "./objectStorage";
 
 const materialContent = v.union(
@@ -99,6 +100,7 @@ export const create = mutation({
   args: { courseId: v.id("courses"), title: v.string(), content: materialContent },
   handler: async (ctx, { courseId, title, content }) => {
     const { organization, user } = await requireCourseCollaborator(ctx, courseId);
+    await requireWritableCourse(ctx, courseId);
     const materialId = await ctx.db.insert("materials", {
       organizationId: organization._id,
       courseId,
@@ -127,8 +129,7 @@ export const create = mutation({
 export const createVersion = mutation({
   args: { materialId: v.id("materials"), content: materialContent },
   handler: async (ctx, { materialId, content }) => {
-    const material = await ctx.db.get(materialId);
-    if (!material) throw new ConvexError("Material not found");
+    const material = await requireWritableMaterial(ctx, materialId);
     const { organization, user } = await requireCourseCollaborator(ctx, material.courseId);
     const materialVersionId = await insertVersion(ctx, material, user._id, content);
     await appendAuditEvent(ctx, {
@@ -145,10 +146,11 @@ export const listByCourse = query({
   args: { courseId: v.id("courses") },
   handler: async (ctx, { courseId }) => {
     await requireCourseCollaborator(ctx, courseId);
-    return await ctx.db
+    const materials = await ctx.db
       .query("materials")
       .withIndex("by_course", (index) => index.eq("courseId", courseId))
       .collect();
+    return materials.filter(({ archivedAt }) => archivedAt === undefined);
   },
 });
 

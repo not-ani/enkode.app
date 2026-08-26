@@ -3,6 +3,7 @@ import { ConvexError, v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import { appendAuditEvent } from "./audit";
 import { requireCourseCollaborator, requireRole } from "./authorization";
+import { requireWritableCourse } from "./lifecycleGuards";
 
 const courseFields = {
   name: v.string(),
@@ -95,6 +96,7 @@ export const listMine = query({
     );
     return courses
       .filter((course) => course !== null)
+      .filter(({ archivedAt }) => archivedAt === undefined)
       .sort((left, right) => left.name.localeCompare(right.name));
   },
 });
@@ -111,6 +113,7 @@ export const update = mutation({
   args: { courseId: v.id("courses"), ...courseFields },
   handler: async (ctx, { courseId, ...changes }) => {
     const { course, organization, user } = await requireCourseCollaborator(ctx, courseId);
+    await requireWritableCourse(ctx, courseId);
     await ctx.db.patch(course._id, {
       name: cleanRequired(changes.name, "Course name"),
       description: cleanOptional(changes.description),
@@ -128,6 +131,7 @@ export const addCollaborator = mutation({
   args: { courseId: v.id("courses"), username: v.string() },
   handler: async (ctx, { courseId, username }) => {
     const { organization, user } = await requireCourseCollaborator(ctx, courseId);
+    await requireWritableCourse(ctx, courseId);
     const teacher = await ctx.db
       .query("users")
       .withIndex("by_organization_username", (index) =>
@@ -165,6 +169,7 @@ export const removeCollaborator = mutation({
   args: { courseId: v.id("courses"), teacherId: v.id("users") },
   handler: async (ctx, { courseId, teacherId }) => {
     const { organization, user } = await requireCourseCollaborator(ctx, courseId);
+    await requireWritableCourse(ctx, courseId);
     const assignment = await ctx.db
       .query("courseCollaborators")
       .withIndex("by_course_teacher", (index) =>

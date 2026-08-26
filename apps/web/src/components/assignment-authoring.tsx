@@ -5,6 +5,8 @@ import { Textarea } from "@enkode.app/ui/components/textarea";
 import { useMutation, useQuery } from "convex/react";
 import { useState, type FormEvent } from "react";
 
+import ArchiveActions from "./archive-actions";
+
 type AssignmentSummary = { _id: string; title: string; latestVersion: number };
 type TestKind = "input_output" | "python_harness";
 type Visibility = "public" | "hidden";
@@ -168,6 +170,7 @@ export default function AssignmentAuthoring({ courseId }: { courseId: string }) 
               >
                 New version
               </Button>
+              <ArchiveActions id={assignment._id} target="assignment" />
             </li>
           ))}
         </ul>

@@ -3,6 +3,7 @@ import { ConvexError, v } from "convex/values";
 import { internalMutation, internalQuery, query } from "./_generated/server";
 import { requireRole } from "./authorization";
 import { eventCandidate } from "./integritySignals";
+import { requireWritableAssignmentRelease } from "./lifecycleGuards";
 
 export const authorizeUpload = internalQuery({
   args: { workspaceId: v.id("workspaces"), startSequence: v.number() },
@@ -16,6 +17,7 @@ export const authorizeUpload = internalQuery({
     ) {
       throw new ConvexError("Forbidden");
     }
+    await requireWritableAssignmentRelease(ctx, workspace.assignmentReleaseId);
     const previous = await ctx.db
       .query("workHistoryChunks")
       .withIndex("by_workspace_sequence", (index) =>
@@ -74,6 +76,7 @@ export const commitChunk = internalMutation({
     ) {
       throw new ConvexError("Work History ownership changed before commit");
     }
+    await requireWritableAssignmentRelease(ctx, workspace.assignmentReleaseId);
 
     const exactStart = await ctx.db
       .query("workHistoryChunks")

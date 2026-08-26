@@ -4,6 +4,7 @@ import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx } from "./_generated/server";
 import { mutation } from "./_generated/server";
 import { requireRole } from "./authorization";
+import { requireWritableAssignmentRelease } from "./lifecycleGuards";
 import { releasePublicationStatus } from "./releasePolicy";
 
 const workspaceFile = v.object({ path: v.string(), content: v.string() });
@@ -21,6 +22,7 @@ async function requireStudentRelease(
   ) {
     throw new ConvexError("Forbidden");
   }
+  await requireWritableAssignmentRelease(ctx, assignmentReleaseId);
   const enrollment = await ctx.db
     .query("enrollments")
     .withIndex("by_classroom_student", (index) =>

@@ -5,6 +5,7 @@ import type { Doc } from "./_generated/dataModel";
 import { action, internalMutation, internalQuery, query } from "./_generated/server";
 import { requireRole } from "./authorization";
 import { executionServiceFromEnvironment } from "./execution";
+import { requireWritableAssignmentRelease } from "./lifecycleGuards";
 import { releasePublicationStatus } from "./releasePolicy";
 import { evaluateRun } from "./runEvaluation";
 
@@ -62,6 +63,7 @@ export const prepare = internalQuery({
     ) {
       throw new ConvexError("Workspace Assignment Version is unavailable");
     }
+    await requireWritableAssignmentRelease(ctx, release._id);
     const enrollment = await ctx.db
       .query("enrollments")
       .withIndex("by_classroom_student", (index) =>
@@ -105,6 +107,7 @@ export const record = internalMutation({
     if (!workspace || workspace.studentId !== user._id || user._id !== input.studentId) {
       throw new ConvexError("Forbidden");
     }
+    await requireWritableAssignmentRelease(ctx, input.assignmentReleaseId);
     return await ctx.db.insert("runs", { ...input, completedAt: Date.now() });
   },
 });
