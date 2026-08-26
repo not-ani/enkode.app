@@ -1,6 +1,8 @@
 import { createClient, type GenericCtx } from "@convex-dev/better-auth";
 import { convex } from "@convex-dev/better-auth/plugins";
 import { betterAuth } from "better-auth/minimal";
+import { admin } from "better-auth/plugins";
+import { adminAc } from "better-auth/plugins/admin/access";
 
 import { components } from "./_generated/api";
 import type { DataModel } from "./_generated/dataModel";
@@ -14,7 +16,7 @@ function authOptions(ctx: GenericCtx<DataModel>, disableSignUp: boolean) {
     throw new Error("SITE_URL is not configured");
   }
 
-  return betterAuth({
+  return {
     baseURL: siteUrl,
     trustedOrigins: [siteUrl],
     database: authComponent.adapter(ctx),
@@ -29,13 +31,27 @@ function authOptions(ctx: GenericCtx<DataModel>, disableSignUp: boolean) {
         jwksRotateOnTokenGenerationError: true,
       }),
     ],
-  });
+  };
 }
 
 export function createAuth(ctx: GenericCtx<DataModel>) {
-  return authOptions(ctx, true);
+  return betterAuth(authOptions(ctx, true));
 }
 
 export function createProvisioningAuth(ctx: GenericCtx<DataModel>) {
-  return authOptions(ctx, false);
+  return betterAuth(authOptions(ctx, false));
+}
+
+export function createCredentialAdminAuth(ctx: GenericCtx<DataModel>) {
+  const options = authOptions(ctx, true);
+  return betterAuth({
+    ...options,
+    plugins: [
+      ...options.plugins,
+      admin({
+        adminRoles: ["user"],
+        roles: { user: adminAc },
+      }),
+    ],
+  });
 }

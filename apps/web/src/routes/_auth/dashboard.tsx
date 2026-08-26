@@ -2,6 +2,8 @@ import { api } from "@enkode.app/backend/convex/_generated/api";
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery } from "convex/react";
 
+import StudentManagement from "@/components/student-management";
+
 export const Route = createFileRoute("/_auth/dashboard")({
   component: DashboardContent,
 });
@@ -25,6 +27,7 @@ function DashboardContent() {
           Courses and classrooms assigned to you will appear here.
         </p>
       </section>
+      {currentUser.role === "teacher" ? <StudentManagement /> : null}
     </main>
   );
 }
