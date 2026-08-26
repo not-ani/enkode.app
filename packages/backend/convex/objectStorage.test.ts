@@ -21,6 +21,13 @@ describe("Work History object storage contract", () => {
     await storage.putImmutable(object);
     await storage.putImmutable(object);
     expect(storage.objects).toHaveLength(1);
+    await expect(
+      storage.getImmutable({
+        key: object.key,
+        sha256: object.sha256,
+        byteLength: bytes.byteLength,
+      }),
+    ).resolves.toEqual(bytes);
     const differentBytes = new TextEncoder().encode("different compressed history");
     await expect(
       storage.putImmutable({
@@ -29,6 +36,35 @@ describe("Work History object storage contract", () => {
         sha256: sha256(differentBytes),
       }),
     ).rejects.toThrow("different bytes");
+  });
+
+  it("reads and verifies immutable bytes through a signed S3 request", async () => {
+    const bytes = new TextEncoder().encode("history");
+    const fetch = vi.fn(
+      async (_input: URL | RequestInfo, _init?: RequestInit) =>
+        new Response(bytes, { status: 200 }),
+    );
+    vi.stubGlobal("fetch", fetch);
+    const storage = new S3CompatibleObjectStorage({
+      endpoint: "https://objects.example.test",
+      bucket: "enkode",
+      region: "us-east-1",
+      accessKeyId: "access",
+      secretAccessKey: "secret",
+    });
+
+    await expect(
+      storage.getImmutable({
+        key: "organizations/org/workspaces/ws/history/1-1.json.gz",
+        sha256: sha256(bytes),
+        byteLength: bytes.byteLength,
+      }),
+    ).resolves.toEqual(bytes);
+    const [, request] = fetch.mock.calls[0]!;
+    expect(request?.method).toBeUndefined();
+    expect(new Headers(request?.headers).get("authorization")).toContain(
+      "AWS4-HMAC-SHA256 Credential=access/",
+    );
   });
 
   it("writes through the path-style S3 boundary with immutable signed requests", async () => {

@@ -118,6 +118,13 @@ function AssignmentWorkspaceRoute() {
           Save stores your Workspace. Running and submitting are separate actions and are never
           triggered by saving.
         </p>
+        <Link
+          to="/work-history/$workspaceId"
+          params={{ workspaceId: workspace._id }}
+          className="self-start text-sm font-medium underline-offset-4 hover:underline"
+        >
+          Open Work History
+        </Link>
       </div>
     </main>
   );

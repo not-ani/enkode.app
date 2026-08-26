@@ -33,9 +33,16 @@ export type ImmutableObject = {
   sha256: string;
 };
 
+export type ImmutableObjectReference = {
+  key: string;
+  sha256: string;
+  byteLength: number;
+};
+
 /** Provider-neutral storage contract shared by uploaded assets and immutable domain objects. */
 export interface ObjectStorage extends ObjectStorageBoundary {
   putImmutable(object: ImmutableObject): Promise<void>;
+  getImmutable(reference: ImmutableObjectReference): Promise<Uint8Array>;
 }
 
 function requiredConfiguration(name: string) {
@@ -170,6 +177,61 @@ export class S3CompatibleObjectStorage
     if (response.status === 412) return;
     if (!response.ok) throw new Error(`Object storage PUT failed (${response.status})`);
   }
+
+  async getImmutable(reference: ImmutableObjectReference) {
+    const now = new Date();
+    const amzDate = now.toISOString().replace(/[:-]|\.\d{3}/g, "");
+    const date = amzDate.slice(0, 8);
+    const endpoint = new URL(this.config.endpoint);
+    const pathname = `/${encodeURIComponent(this.config.bucket)}/${encodePath(reference.key)}`;
+    const payloadHash = createHash("sha256").update("").digest("hex");
+    const headers = {
+      "x-amz-content-sha256": payloadHash,
+      "x-amz-date": amzDate,
+    };
+    const signedHeaderNames = Object.keys(headers).concat("host").sort();
+    const canonicalHeaders = signedHeaderNames
+      .map(
+        (name) =>
+          `${name}:${name === "host" ? endpoint.host : headers[name as keyof typeof headers]}`,
+      )
+      .join("\n");
+    const canonicalRequest = [
+      "GET",
+      pathname,
+      "",
+      canonicalHeaders,
+      signedHeaderNames.join(";"),
+      payloadHash,
+    ].join("\n");
+    const scope = `${date}/${this.config.region}/s3/aws4_request`;
+    const stringToSign = [
+      "AWS4-HMAC-SHA256",
+      amzDate,
+      scope,
+      createHash("sha256").update(canonicalRequest).digest("hex"),
+    ].join("\n");
+    const dateKey = hmac(`AWS4${this.config.secretAccessKey}`, date);
+    const regionKey = hmac(dateKey, this.config.region);
+    const serviceKey = hmac(regionKey, "s3");
+    const signingKey = hmac(serviceKey, "aws4_request");
+    const signature = createHmac("sha256", signingKey).update(stringToSign).digest("hex");
+    const response = await fetch(new URL(pathname, endpoint), {
+      headers: {
+        ...headers,
+        authorization: `AWS4-HMAC-SHA256 Credential=${this.config.accessKeyId}/${scope}, SignedHeaders=${signedHeaderNames.join(";")}, Signature=${signature}`,
+      },
+    });
+    if (!response.ok) throw new Error(`Object storage GET failed (${response.status})`);
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    if (
+      bytes.byteLength !== reference.byteLength ||
+      createHash("sha256").update(bytes).digest("hex") !== reference.sha256
+    ) {
+      throw new Error("Immutable object hash or length does not match its reference");
+    }
+    return bytes;
+  }
 }
 
 export class FakeObjectStorage extends ProviderNeutralObjectStorage implements ObjectStorage {
@@ -188,6 +250,15 @@ export class FakeObjectStorage extends ProviderNeutralObjectStorage implements O
       throw new Error("Immutable object key already contains different bytes");
     }
     if (!existing) this.objects.set(object.key, { ...object, bytes: object.bytes.slice() });
+  }
+
+  async getImmutable(reference: ImmutableObjectReference) {
+    const object = this.objects.get(reference.key);
+    if (!object) throw new Error("Immutable object not found");
+    if (object.sha256 !== reference.sha256 || object.bytes.byteLength !== reference.byteLength) {
+      throw new Error("Immutable object hash or length does not match its reference");
+    }
+    return object.bytes.slice();
   }
 }
 

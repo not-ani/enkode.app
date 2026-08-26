@@ -13,6 +13,7 @@ import MaterialAuthoring from "@/components/material-authoring";
 import MaterialReleases, { StudentMaterials } from "@/components/material-releases";
 import LiveWorkspaces from "@/components/live-workspaces";
 import StudentManagement from "@/components/student-management";
+import WorkHistoryList from "@/components/work-history-list";
 
 export const Route = createFileRoute("/_auth/dashboard")({ component: DashboardContent });
 
@@ -230,6 +231,7 @@ function DashboardContent() {
         <AssignmentReleases classrooms={classrooms} />
         <MaterialReleases classrooms={classrooms} />
         <LiveWorkspaces />
+        <WorkHistoryList role="teacher" />
         <StudentManagement />
       </div>
     </main>
@@ -265,6 +267,7 @@ function StudentDashboard({ displayName }: { displayName: string }) {
       </section>
       <StudentAssignmentReleases />
       <StudentMaterials />
+      <WorkHistoryList role="student" />
     </main>
   );
 }

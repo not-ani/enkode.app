@@ -199,6 +199,7 @@ export default defineSchema({
     historyAckSequence: v.optional(v.number()),
   })
     .index("by_release_student", ["assignmentReleaseId", "studentId"])
+    .index("by_assignment_release", ["assignmentReleaseId"])
     .index("by_student", ["studentId"]),
 
   workHistoryChunks: defineTable({

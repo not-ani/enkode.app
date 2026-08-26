@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
 import { gunzipSync } from "node:zlib";
 
+import type { ReplayEvent, ReplayFile } from "./workHistoryReplayModel";
+
 export type ChunkManifest = {
   workspaceId: string;
   startSequence: number;
@@ -40,6 +42,36 @@ export function validateChunk(manifest: ChunkManifest, bytes: Uint8Array, snapsh
   } else if (manifest.snapshotHash || manifest.snapshotByteLength !== undefined) {
     throw new Error("Work History snapshot bytes are missing");
   }
+}
+
+export function decodeSnapshotPayload(manifest: ChunkManifest, snapshot: Uint8Array) {
+  if (
+    snapshot.byteLength !== manifest.snapshotByteLength ||
+    sha256(snapshot) !== manifest.snapshotHash
+  ) {
+    throw new Error("Work History snapshot hash or length does not match its manifest");
+  }
+  let payload: unknown;
+  try {
+    payload = JSON.parse(gunzipSync(snapshot).toString("utf8"));
+  } catch {
+    throw new Error("Work History snapshot is not valid gzip JSON");
+  }
+  const candidate = payload as {
+    version?: unknown;
+    workspaceId?: unknown;
+    sequence?: unknown;
+    files?: unknown;
+  };
+  if (
+    candidate.version !== 1 ||
+    candidate.workspaceId !== manifest.workspaceId ||
+    candidate.sequence !== manifest.endSequence ||
+    !Array.isArray(candidate.files)
+  ) {
+    throw new Error("Work History snapshot does not match its manifest");
+  }
+  return { sequence: candidate.sequence, files: candidate.files as ReplayFile[] };
 }
 
 const origins = new Set([
@@ -91,28 +123,11 @@ export function validateChunkPayload(
       throw new Error("Invalid Work History event type");
     }
   }
+  let decodedSnapshot: { sequence: number; files: ReplayFile[] } | undefined;
   if (snapshot) {
-    let snapshotPayload: unknown;
-    try {
-      snapshotPayload = JSON.parse(gunzipSync(snapshot).toString("utf8"));
-    } catch {
-      throw new Error("Work History snapshot is not valid gzip JSON");
-    }
-    const candidateSnapshot = snapshotPayload as {
-      version?: unknown;
-      workspaceId?: unknown;
-      sequence?: unknown;
-      files?: unknown;
-    };
-    if (
-      candidateSnapshot.version !== 1 ||
-      candidateSnapshot.workspaceId !== manifest.workspaceId ||
-      candidateSnapshot.sequence !== manifest.endSequence ||
-      !Array.isArray(candidateSnapshot.files)
-    ) {
-      throw new Error("Work History snapshot does not match its manifest");
-    }
+    decodedSnapshot = decodeSnapshotPayload(manifest, snapshot);
   }
+  return { events: candidate.events as ReplayEvent[], snapshot: decodedSnapshot };
 }
 
 export function objectKeys(organizationId: string, manifest: ChunkManifest) {
