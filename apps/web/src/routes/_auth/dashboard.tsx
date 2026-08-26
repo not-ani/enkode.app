@@ -6,6 +6,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useMutation, useQuery } from "convex/react";
 import { useState, type FormEvent } from "react";
 
+import ClassroomEnrollments from "@/components/classroom-enrollments";
 import StudentManagement from "@/components/student-management";
 
 export const Route = createFileRoute("/_auth/dashboard")({ component: DashboardContent });
@@ -47,13 +48,7 @@ function DashboardContent() {
   }
 
   if (currentUser.role !== "teacher") {
-    return (
-      <main className="isolate p-6">
-        <h1 className="text-balance text-2xl font-semibold tracking-tight">
-          Welcome, {currentUser.displayName}
-        </h1>
-      </main>
-    );
+    return <StudentDashboard displayName={currentUser.displayName} />;
   }
 
   if (!courses || !classrooms) {
@@ -226,8 +221,40 @@ function DashboardContent() {
             kind="classroom"
           />
         </div>
+        <ClassroomEnrollments classrooms={classrooms} />
         <StudentManagement />
       </div>
+    </main>
+  );
+}
+
+function StudentDashboard({ displayName }: { displayName: string }) {
+  const classrooms = useQuery(api.enrollments.listMine) as
+    | { enrollmentId: string; classroomId: string; classroomName: string; courseName: string }[]
+    | undefined;
+
+  return (
+    <main className="isolate p-6">
+      <h1 className="text-balance text-2xl font-semibold tracking-tight">Welcome, {displayName}</h1>
+      <section className="mt-8 flex max-w-2xl flex-col gap-3">
+        <h2 className="text-xl font-semibold">Your Classrooms</h2>
+        {!classrooms ? (
+          <p className="text-muted-foreground text-base sm:text-sm">Loading Classrooms…</p>
+        ) : classrooms.length === 0 ? (
+          <p className="text-muted-foreground text-base sm:text-sm">
+            You do not have any active Classroom Enrollments.
+          </p>
+        ) : (
+          <ul role="list" className="divide-y divide-foreground/10 border-y border-foreground/10">
+            {classrooms.map((classroom) => (
+              <li className="py-4" key={classroom.enrollmentId}>
+                <p className="font-medium">{classroom.classroomName}</p>
+                <p className="text-muted-foreground text-base sm:text-sm">{classroom.courseName}</p>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
     </main>
   );
 }

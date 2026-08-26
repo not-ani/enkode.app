@@ -53,6 +53,17 @@ export default defineSchema({
     .index("by_classroom_teacher", ["classroomId", "teacherId"])
     .index("by_teacher", ["teacherId"]),
 
+  enrollments: defineTable({
+    organizationId: v.id("organizations"),
+    classroomId: v.id("classrooms"),
+    studentId: v.id("users"),
+    status: v.union(v.literal("active"), v.literal("ended")),
+    endedAt: v.optional(v.number()),
+  })
+    .index("by_classroom", ["classroomId"])
+    .index("by_classroom_student", ["classroomId", "studentId"])
+    .index("by_student_status", ["studentId", "status"]),
+
   auditEvents: defineTable({
     organizationId: v.id("organizations"),
     actorKind: v.union(v.literal("developer"), v.literal("user")),
