@@ -1,0 +1,216 @@
+import { ConvexError, v } from "convex/values";
+
+import type { Doc, Id } from "./_generated/dataModel";
+import type { MutationCtx, QueryCtx } from "./_generated/server";
+import { mutation, query } from "./_generated/server";
+import { validateEvaluationTest, validateFilePath } from "./assignmentPolicy";
+import { appendAuditEvent } from "./audit";
+import { requireCourseCollaborator } from "./authorization";
+import { maintainedPythonRuntime, requireMaintainedPythonRuntime } from "./runtimeCatalog";
+
+const starterFile = v.object({ path: v.string(), content: v.string() });
+const evaluationTest = v.object({
+  name: v.string(),
+  kind: v.union(v.literal("input_output"), v.literal("python_harness")),
+  visibility: v.union(v.literal("public"), v.literal("hidden")),
+  weight: v.number(),
+  stdin: v.optional(v.string()),
+  expectedOutput: v.optional(v.string()),
+  harness: v.optional(v.string()),
+  passGuidance: v.optional(v.string()),
+  failGuidance: v.optional(v.string()),
+});
+const versionFields = {
+  instructions: v.string(),
+  runtimeVersion: v.string(),
+  entrypoint: v.string(),
+  starterFiles: v.array(starterFile),
+  evaluationTests: v.array(evaluationTest),
+};
+
+type VersionInput = {
+  instructions: string;
+  runtimeVersion: string;
+  entrypoint: string;
+  starterFiles: { path: string; content: string }[];
+  evaluationTests: {
+    name: string;
+    kind: "input_output" | "python_harness";
+    visibility: "public" | "hidden";
+    weight: number;
+    stdin?: string;
+    expectedOutput?: string;
+    harness?: string;
+    passGuidance?: string;
+    failGuidance?: string;
+  }[];
+};
+
+function cleanRequired(value: string, label: string) {
+  const cleaned = value.trim();
+  if (!cleaned) throw new ConvexError(`${label} is required`);
+  return cleaned;
+}
+
+function cleanOptional(value: string | undefined) {
+  const cleaned = value?.trim();
+  return cleaned || undefined;
+}
+
+function validateVersion(input: VersionInput) {
+  const instructions = cleanRequired(input.instructions, "Instructions");
+  const entrypoint = validateFilePath(input.entrypoint);
+  requireMaintainedPythonRuntime(input.runtimeVersion);
+  if (input.starterFiles.length === 0) throw new ConvexError("Add at least one starter file");
+
+  const paths = input.starterFiles.map(({ path }) => validateFilePath(path));
+  if (new Set(paths).size !== paths.length)
+    throw new ConvexError("Starter file paths must be unique");
+  if (!paths.includes(entrypoint)) throw new ConvexError("The entrypoint must be a starter file");
+  if (!entrypoint.endsWith(".py")) throw new ConvexError("The Python entrypoint must end in .py");
+  input.evaluationTests.forEach(validateEvaluationTest);
+  return { instructions, entrypoint, paths };
+}
+
+async function insertVersion(
+  ctx: MutationCtx,
+  assignment: Doc<"assignments">,
+  createdBy: Id<"users">,
+  input: VersionInput,
+) {
+  const { entrypoint, instructions, paths } = validateVersion(input);
+  const version = assignment.latestVersion + 1;
+  const assignmentVersionId = await ctx.db.insert("assignmentVersions", {
+    organizationId: assignment.organizationId,
+    assignmentId: assignment._id,
+    version,
+    instructions,
+    language: "python",
+    runtimeVersion: input.runtimeVersion,
+    entrypoint,
+    createdBy,
+    createdAt: Date.now(),
+  });
+  await Promise.all(
+    input.starterFiles.map((file, order) =>
+      ctx.db.insert("assignmentStarterFiles", {
+        organizationId: assignment.organizationId,
+        assignmentVersionId,
+        path: paths[order]!,
+        content: file.content,
+        order,
+      }),
+    ),
+  );
+  await Promise.all(
+    input.evaluationTests.map((test, order) =>
+      ctx.db.insert("evaluationTests", {
+        organizationId: assignment.organizationId,
+        assignmentVersionId,
+        name: test.name.trim(),
+        kind: test.kind,
+        visibility: test.visibility,
+        weight: test.weight,
+        stdin: test.kind === "input_output" ? test.stdin : undefined,
+        expectedOutput: test.kind === "input_output" ? test.expectedOutput : undefined,
+        harness: test.kind === "python_harness" ? test.harness?.trim() : undefined,
+        passGuidance: cleanOptional(test.passGuidance),
+        failGuidance: cleanOptional(test.failGuidance),
+        order,
+      }),
+    ),
+  );
+  await ctx.db.patch(assignment._id, { latestVersion: version });
+  return assignmentVersionId;
+}
+
+async function loadVersion(ctx: QueryCtx, assignmentVersionId: Id<"assignmentVersions">) {
+  const version = await ctx.db.get(assignmentVersionId);
+  if (!version) throw new ConvexError("Assignment Version not found");
+  const starterFiles = await ctx.db
+    .query("assignmentStarterFiles")
+    .withIndex("by_version", (index) => index.eq("assignmentVersionId", assignmentVersionId))
+    .collect();
+  const evaluationTests = await ctx.db
+    .query("evaluationTests")
+    .withIndex("by_version", (index) => index.eq("assignmentVersionId", assignmentVersionId))
+    .collect();
+  return { ...version, starterFiles, evaluationTests };
+}
+
+export const supportedRuntime = query({
+  args: { courseId: v.id("courses") },
+  handler: async (ctx, { courseId }) => {
+    await requireCourseCollaborator(ctx, courseId);
+    return maintainedPythonRuntime;
+  },
+});
+
+export const create = mutation({
+  args: { courseId: v.id("courses"), title: v.string(), ...versionFields },
+  handler: async (ctx, { courseId, title, ...versionInput }) => {
+    const { organization, user } = await requireCourseCollaborator(ctx, courseId);
+    const assignmentId = await ctx.db.insert("assignments", {
+      organizationId: organization._id,
+      courseId,
+      title: cleanRequired(title, "Assignment title"),
+      latestVersion: 0,
+    });
+    const assignment = await ctx.db.get(assignmentId);
+    if (!assignment) throw new ConvexError("Assignment could not be created");
+    const assignmentVersionId = await insertVersion(ctx, assignment, user._id, versionInput);
+    await appendAuditEvent(ctx, {
+      organizationId: organization._id,
+      actor: { kind: "user", userId: user._id },
+      action: "assignment.created",
+      target: { kind: "assignment", id: assignmentId },
+    });
+    await appendAuditEvent(ctx, {
+      organizationId: organization._id,
+      actor: { kind: "user", userId: user._id },
+      action: "assignment_version.created",
+      target: { kind: "assignment_version", id: assignmentVersionId },
+    });
+    return { assignmentId, assignmentVersionId };
+  },
+});
+
+export const createVersion = mutation({
+  args: { assignmentId: v.id("assignments"), ...versionFields },
+  handler: async (ctx, { assignmentId, ...versionInput }) => {
+    const assignment = await ctx.db.get(assignmentId);
+    if (!assignment) throw new ConvexError("Assignment not found");
+    const { organization, user } = await requireCourseCollaborator(ctx, assignment.courseId);
+    const assignmentVersionId = await insertVersion(ctx, assignment, user._id, versionInput);
+    await appendAuditEvent(ctx, {
+      organizationId: organization._id,
+      actor: { kind: "user", userId: user._id },
+      action: "assignment_version.created",
+      target: { kind: "assignment_version", id: assignmentVersionId },
+    });
+    return assignmentVersionId;
+  },
+});
+
+export const listByCourse = query({
+  args: { courseId: v.id("courses") },
+  handler: async (ctx, { courseId }) => {
+    await requireCourseCollaborator(ctx, courseId);
+    return await ctx.db
+      .query("assignments")
+      .withIndex("by_course", (index) => index.eq("courseId", courseId))
+      .collect();
+  },
+});
+
+export const getVersion = query({
+  args: { assignmentVersionId: v.id("assignmentVersions") },
+  handler: async (ctx, { assignmentVersionId }) => {
+    const version = await ctx.db.get(assignmentVersionId);
+    if (!version) throw new ConvexError("Assignment Version not found");
+    const assignment = await ctx.db.get(version.assignmentId);
+    if (!assignment) throw new ConvexError("Assignment not found");
+    await requireCourseCollaborator(ctx, assignment.courseId);
+    return await loadVersion(ctx, assignmentVersionId);
+  },
+});

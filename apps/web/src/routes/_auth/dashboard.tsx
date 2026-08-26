@@ -7,6 +7,7 @@ import { useMutation, useQuery } from "convex/react";
 import { useState, type FormEvent } from "react";
 
 import ClassroomEnrollments from "@/components/classroom-enrollments";
+import AssignmentAuthoring from "@/components/assignment-authoring";
 import StudentManagement from "@/components/student-management";
 
 export const Route = createFileRoute("/_auth/dashboard")({ component: DashboardContent });
@@ -295,6 +296,7 @@ function TeachingList(
                   kind={isCourse ? "course" : "classroom"}
                   assignments={assignments}
                 />
+                {isCourse ? <AssignmentAuthoring courseId={item._id} /> : null}
               </li>
             );
           })}
