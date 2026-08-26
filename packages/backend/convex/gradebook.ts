@@ -3,7 +3,8 @@ import { ConvexError, v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { QueryCtx } from "./_generated/server";
 import { query } from "./_generated/server";
-import { requireClassroomTeacher } from "./authorization";
+import { requireClassroomTeacher, requireRole } from "./authorization";
+import { deriveDeadlineFacts, effectiveDeadline } from "./deadlinePolicy";
 import { deriveAssignmentStatus } from "./gradePolicy";
 import { releasePublicationStatus } from "./releasePolicy";
 
@@ -39,8 +40,9 @@ async function readGradebook(ctx: QueryCtx, classroomId: Id<"classrooms">) {
   );
   const releaseRecords = await Promise.all(
     releases.map(async (release) => {
-      const [assignment, submissions, grades] = await Promise.all([
+      const [assignment, version, submissions, grades, deadlineExceptions] = await Promise.all([
         ctx.db.get(release.assignmentId),
+        ctx.db.get(release.assignmentVersionId),
         ctx.db
           .query("submissions")
           .withIndex("by_release_student_attempt", (index) =>
@@ -51,9 +53,15 @@ async function readGradebook(ctx: QueryCtx, classroomId: Id<"classrooms">) {
           .query("grades")
           .withIndex("by_release_student", (index) => index.eq("assignmentReleaseId", release._id))
           .collect(),
+        ctx.db
+          .query("deadlineExceptions")
+          .withIndex("by_release", (index) => index.eq("assignmentReleaseId", release._id))
+          .collect(),
       ]);
-      if (!assignment) throw new ConvexError("Assignment Release content is unavailable");
-      return { assignment, grades, release, submissions };
+      if (!assignment || !version) {
+        throw new ConvexError("Assignment Release content is unavailable");
+      }
+      return { assignment, deadlineExceptions, grades, release, submissions, version };
     }),
   );
 
@@ -105,9 +113,10 @@ async function readGradebook(ctx: QueryCtx, classroomId: Id<"classrooms">) {
 
   return {
     classroom: { id: classroom._id, name: classroom.name, courseName: course.name },
-    releases: releaseRecords.map(({ assignment, release }) => ({
+    releases: releaseRecords.map(({ assignment, release, version }) => ({
       id: release._id,
       assignmentTitle: assignment.title,
+      version: version.version,
       points: release.points,
       order: release.order,
       publicationStatus: releasePublicationStatus(release),
@@ -117,16 +126,26 @@ async function readGradebook(ctx: QueryCtx, classroomId: Id<"classrooms">) {
       displayName: student.displayName,
       username: student.username,
       enrollmentStatus: enrollment.status,
-      cells: releaseRecords.map(({ release }) => {
+      cells: releaseRecords.map(({ deadlineExceptions, release }) => {
         const key = cellKey(release._id, student._id);
         const attempts = submissionsByCell.get(key) ?? [];
         const grade = gradesByCell.get(key);
         const latestSubmission = newestAttempt(attempts);
+        const exception = deadlineExceptions.find(({ studentId }) => studentId === student._id);
+        const deadline = effectiveDeadline(release, exception);
+        const excused = enrollment.status === "ended" && attempts.length === 0 && !grade;
+        const deadlineFacts = deriveDeadlineFacts({
+          deadlineAt: deadline.deadlineAt,
+          attemptsUsed: attempts.length,
+          hasLateSubmission: attempts.some(({ late }) => late === true),
+          now: Date.now(),
+        });
         return {
           assignmentReleaseId: release._id,
           points: grade?.points,
+          deadlineFacts: { ...deadlineFacts, missing: !excused && deadlineFacts.missing },
           status: deriveAssignmentStatus({
-            excused: enrollment.status === "ended" && attempts.length === 0 && !grade,
+            excused,
             latestSubmissionAttempt: latestSubmission?.attemptNumber,
             returnedSubmissionAttempt: grade ? returnedAttemptByGrade.get(grade._id) : undefined,
           }),
@@ -139,4 +158,35 @@ async function readGradebook(ctx: QueryCtx, classroomId: Id<"classrooms">) {
 export const forClassroom = query({
   args: { classroomId: v.id("classrooms") },
   handler: async (ctx, { classroomId }) => await readGradebook(ctx, classroomId),
+});
+
+export const listClassrooms = query({
+  args: {},
+  handler: async (ctx) => {
+    const { user } = await requireRole(ctx, "teacher");
+    const assignments = await ctx.db
+      .query("classroomTeachers")
+      .withIndex("by_teacher", (index) => index.eq("teacherId", user._id))
+      .collect();
+    const classrooms = await Promise.all(
+      assignments.map(async ({ classroomId }) => {
+        const classroom = await ctx.db.get(classroomId);
+        if (!classroom) return null;
+        const course = await ctx.db.get(classroom.courseId);
+        if (!course) throw new ConvexError("Classroom Course is unavailable");
+        return {
+          _id: classroom._id,
+          name: classroom.name,
+          courseName: course.name,
+          archived: classroom.archivedAt !== undefined || course.archivedAt !== undefined,
+        };
+      }),
+    );
+    return classrooms
+      .filter((classroom) => classroom !== null)
+      .sort(
+        (left, right) =>
+          Number(left.archived) - Number(right.archived) || left.name.localeCompare(right.name),
+      );
+  },
 });

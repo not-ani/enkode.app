@@ -49,6 +49,8 @@ function GradebookCellRoute() {
             {cell.points === undefined
               ? "No points yet"
               : `${cell.points} / ${release.points} points`}
+            {cell.deadlineFacts.missing ? " · Missing" : ""}
+            {cell.deadlineFacts.late ? " · Late" : ""}
           </p>
         </header>
         {hasSubmission ? (

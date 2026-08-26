@@ -5,17 +5,20 @@ import { useState } from "react";
 
 import { assignmentStatusLabel, type GradebookData } from "@/lib/gradebook";
 
-type Classroom = { _id: string; name: string; courseName: string };
+type Classroom = { _id: string; name: string; courseName: string; archived: boolean };
 
-export default function Gradebook({ classrooms }: { classrooms: Classroom[] }) {
-  const [classroomId, setClassroomId] = useState(classrooms[0]?._id ?? "");
-  const selectedClassroomId = classrooms.some(({ _id }) => _id === classroomId)
+export default function Gradebook() {
+  const classrooms = useQuery(api.gradebook.listClassrooms, {}) as Classroom[] | undefined;
+  const [classroomId, setClassroomId] = useState("");
+  const availableClassrooms = classrooms ?? [];
+  const selectedClassroomId = availableClassrooms.some(({ _id }) => _id === classroomId)
     ? classroomId
-    : (classrooms[0]?._id ?? "");
+    : (availableClassrooms[0]?._id ?? "");
   const gradebook = useQuery(
     api.gradebook.forClassroom,
     selectedClassroomId ? { classroomId: selectedClassroomId } : "skip",
   ) as GradebookData | undefined;
+  if (!classrooms) return <p className="text-sm text-muted-foreground">Loading Gradebook…</p>;
 
   return (
     <section className="flex min-w-0 flex-col gap-5 border-t border-foreground/10 pt-8">
@@ -42,6 +45,7 @@ export default function Gradebook({ classrooms }: { classrooms: Classroom[] }) {
               {classrooms.map((classroom) => (
                 <option value={classroom._id} key={classroom._id}>
                   {classroom.name} · {classroom.courseName}
+                  {classroom.archived ? " · archived" : ""}
                 </option>
               ))}
             </select>
@@ -68,7 +72,7 @@ export default function Gradebook({ classrooms }: { classrooms: Classroom[] }) {
                       <th className="min-w-44 px-3 py-3 font-medium" key={release.id}>
                         <span className="block">{release.assignmentTitle}</span>
                         <span className="block font-normal text-muted-foreground">
-                          {release.points} points
+                          v{release.version} · {release.points} points
                           {release.publicationStatus === "published"
                             ? ""
                             : ` · ${release.publicationStatus}`}
@@ -109,6 +113,12 @@ export default function Gradebook({ classrooms }: { classrooms: Classroom[] }) {
                               <span className="block text-muted-foreground">
                                 {assignmentStatusLabel[cell.status]}
                               </span>
+                              {cell.deadlineFacts.missing ? (
+                                <span className="block text-destructive">Missing</span>
+                              ) : null}
+                              {cell.deadlineFacts.late ? (
+                                <span className="block text-muted-foreground">Late</span>
+                              ) : null}
                             </Link>
                           </td>
                         );

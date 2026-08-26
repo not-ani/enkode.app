@@ -10,6 +10,7 @@ export type GradebookData = {
   releases: {
     id: string;
     assignmentTitle: string;
+    version: number;
     points: number;
     order: number;
     publicationStatus: "draft" | "scheduled" | "published";
@@ -19,7 +20,12 @@ export type GradebookData = {
     displayName: string;
     username: string;
     enrollmentStatus: "active" | "ended";
-    cells: { assignmentReleaseId: string; points?: number; status: AssignmentStatus }[];
+    cells: {
+      assignmentReleaseId: string;
+      points?: number;
+      status: AssignmentStatus;
+      deadlineFacts: { missing: boolean; late: boolean };
+    }[];
   }[];
 };
 

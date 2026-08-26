@@ -240,7 +240,7 @@ function DashboardContent() {
         </div>
         <ClassroomEnrollments classrooms={classrooms} />
         <AssignmentReleases classrooms={classrooms} />
-        <Gradebook classrooms={classrooms} />
+        <Gradebook />
         <Grading classrooms={classrooms} />
         <MaterialReleases classrooms={classrooms} />
         <LiveWorkspaces />

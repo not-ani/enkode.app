@@ -102,8 +102,12 @@ async function seed(backend: ReturnType<typeof convexTest>) {
       return { assignmentReleaseId, assignmentVersionId };
     }
 
-    await addRelease("Later", 2);
+    const later = await addRelease("Later", 2);
     const earlier = await addRelease("Earlier", 1);
+    await ctx.db.patch(earlier.assignmentReleaseId, {
+      deadlinePolicy: "accept_late",
+      deadlineAt: 100,
+    });
 
     async function addSubmission(studentId: Id<"users">, attemptNumber: number) {
       const workspaceId = await ctx.db.insert("workspaces", {
@@ -169,6 +173,7 @@ async function seed(backend: ReturnType<typeof convexTest>) {
     }
 
     const betaSubmission = await addSubmission(students.beta!, 1);
+    await ctx.db.patch(betaSubmission, { late: true, effectiveDeadlineAt: 100 });
     await addGrade(students.beta!, betaSubmission, 7);
     const gammaFirst = await addSubmission(students.gamma!, 1);
     const gammaGrade = await addGrade(students.gamma!, gammaFirst, 8);
@@ -205,7 +210,7 @@ async function seed(backend: ReturnType<typeof convexTest>) {
     await ctx.db.patch(deltaGrade, { latestReturnId: deltaReturn });
     await addSubmission(students.ended!, 1);
 
-    return { classroomId };
+    return { classroomId, earlier, later, teacherId };
   });
 }
 
@@ -219,7 +224,11 @@ describe("Classroom Gradebook", () => {
       releases: { assignmentTitle: string }[];
       students: {
         displayName: string;
-        cells: { points?: number; status: string }[];
+        cells: {
+          deadlineFacts: { missing: boolean; late: boolean };
+          points?: number;
+          status: string;
+        }[];
       }[];
     };
 
@@ -263,6 +272,52 @@ describe("Classroom Gradebook", () => {
         { points: undefined, status: "awaiting_submission" },
       ],
     });
+    expect(result.students[0]?.cells[0]?.deadlineFacts).toEqual({ missing: true, late: false });
+    expect(result.students[1]?.cells[0]?.deadlineFacts).toEqual({ missing: false, late: true });
+    expect(result.students[3]?.cells[1]?.deadlineFacts).toEqual({ missing: false, late: false });
+  });
+
+  it("keeps adopted Versions and archived Classrooms available as historical Gradebooks", async () => {
+    const backend = convexTest(schema, modules);
+    const { classroomId, earlier, teacherId } = await seed(backend);
+    const secondVersionId = await backend.run(async (ctx) => {
+      const firstVersion = (await ctx.db.get(earlier.assignmentVersionId))!;
+      const versionId = await ctx.db.insert("assignmentVersions", {
+        organizationId: firstVersion.organizationId,
+        assignmentId: firstVersion.assignmentId,
+        version: 2,
+        instructions: "Adopted",
+        language: "python",
+        runtimeVersion: "3.12.0",
+        entrypoint: "main.py",
+        createdBy: teacherId,
+        createdAt: 3,
+      });
+      await ctx.db.patch(firstVersion.assignmentId, { latestVersion: 2 });
+      return versionId;
+    });
+    const teacher = backend.withIdentity({ subject: "teacher" });
+    await teacher.mutation(api.assignmentReleases.adoptVersion, {
+      assignmentReleaseId: earlier.assignmentReleaseId,
+      assignmentVersionId: secondVersionId,
+    });
+    await teacher.mutation(api.archive.archiveClassroom, { classroomId });
+    const [classrooms, gradebook] = await Promise.all([
+      teacher.query(api.gradebook.listClassrooms, {}),
+      teacher.query(api.gradebook.forClassroom, { classroomId }),
+    ]);
+
+    expect(classrooms).toEqual([
+      expect.objectContaining({ _id: classroomId, archived: true, courseName: "CS101" }),
+    ]);
+    expect(gradebook.releases[0]).toMatchObject({
+      id: earlier.assignmentReleaseId,
+      version: 2,
+    });
+    expect(secondVersionId).not.toBe(earlier.assignmentVersionId);
+    expect(
+      gradebook.students.map((student: { displayName: string }) => student.displayName),
+    ).toContain("Ended");
   });
 
   it("allows only assigned Classroom Teachers", async () => {
