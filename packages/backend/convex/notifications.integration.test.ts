@@ -65,6 +65,37 @@ async function seed(backend: ReturnType<typeof createTestBackend>) {
 }
 
 describe("Notifications", () => {
+  it("notifies Students for immediate Assignment and manual Material publication", async () => {
+    const context = await seed(createTestBackend());
+    const assignmentReleaseId = await context.teacher.mutation(api.assignmentReleases.create, {
+      classroomId: context.classroomId,
+      assignmentVersionId: context.assignment.assignmentVersionId,
+      points: 10,
+    });
+    const material = await context.teacher.mutation(api.materials.create, {
+      courseId: context.courseId,
+      title: "Reference",
+      content: { kind: "rich_text", richText: "Read this" },
+    });
+    const materialReleaseId = await context.teacher.mutation(api.materialReleases.create, {
+      classroomId: context.classroomId,
+      materialVersionId: material.materialVersionId,
+      publication: "draft",
+    });
+
+    expect(await context.student.query(api.notifications.listMine, {})).toMatchObject([
+      { type: "assignment_available", assignmentReleaseId },
+    ]);
+
+    await context.teacher.mutation(api.materialReleases.publishNow, { materialReleaseId });
+    await context.teacher.mutation(api.materialReleases.publishNow, { materialReleaseId });
+
+    expect(await context.student.query(api.notifications.listMine, {})).toMatchObject([
+      { type: "material_available", materialReleaseId },
+      { type: "assignment_available", assignmentReleaseId },
+    ]);
+  });
+
   it("notifies Students when Assignment Releases become available or adopt a newer Version", async () => {
     const context = await seed(createTestBackend());
     const scheduledFor = Date.now() - 1;
@@ -180,26 +211,35 @@ describe("Notifications", () => {
           updatedAt: 1,
         }),
     );
-    const submission = await context.student.mutation(internal.submissions.record, {
-      workspaceId,
-      organizationId: context.organizationId,
-      studentId: context.studentId,
-      assignmentReleaseId: releaseId,
-      assignmentVersionId: context.assignment.assignmentVersionId,
-      runtimeVersion: "3.12.0",
-      entrypoint: "main.py",
-      historySequence: 1,
-      idempotencyKey: "submit-once",
-      snapshot: {
-        objectKey: "snapshots/one",
-        contentHash: "a".repeat(64),
-        byteLength: 10,
-        files: [{ path: "main.py", contentHash: "b".repeat(64), byteLength: 15 }],
-      },
-      execution: { status: "completed", stdout: "hello\n", stderr: "", exitCode: 0, signal: null },
-      testResults: [],
-      proposedPoints: 0,
-    });
+    const recordSubmission = () =>
+      context.student.mutation(internal.submissions.record, {
+        workspaceId,
+        organizationId: context.organizationId,
+        studentId: context.studentId,
+        assignmentReleaseId: releaseId,
+        assignmentVersionId: context.assignment.assignmentVersionId,
+        runtimeVersion: "3.12.0",
+        entrypoint: "main.py",
+        historySequence: 1,
+        idempotencyKey: "submit-once",
+        snapshot: {
+          objectKey: "snapshots/one",
+          contentHash: "a".repeat(64),
+          byteLength: 10,
+          files: [{ path: "main.py", contentHash: "b".repeat(64), byteLength: 15 }],
+        },
+        execution: {
+          status: "completed",
+          stdout: "hello\n",
+          stderr: "",
+          exitCode: 0,
+          signal: null,
+        },
+        testResults: [],
+        proposedPoints: 0,
+      });
+    const submission = await recordSubmission();
+    await recordSubmission();
 
     const primary = await context.teacher.query(api.notifications.listMine, {});
     const other = await context.backend
@@ -320,6 +360,36 @@ describe("Notifications", () => {
         )
         .unique();
       if (enrollment) await ctx.db.patch(enrollment._id, { status: "ended", endedAt: Date.now() });
+    });
+    expect(await context.student.query(api.notifications.listMine, {})).toEqual([]);
+  });
+
+  it("stops returning Notifications when their Classroom or content is archived", async () => {
+    const context = await seed(createTestBackend());
+    await context.teacher.mutation(api.assignmentReleases.create, {
+      classroomId: context.classroomId,
+      assignmentVersionId: context.assignment.assignmentVersionId,
+      points: 10,
+    });
+    expect(await context.student.query(api.notifications.listMine, {})).toHaveLength(1);
+
+    await context.backend.run(async (ctx) => {
+      await ctx.db.patch(context.assignment.assignmentId, {
+        archivedAt: Date.now(),
+        archivedBy: context.teacherId,
+      });
+    });
+    expect(await context.student.query(api.notifications.listMine, {})).toEqual([]);
+
+    await context.backend.run(async (ctx) => {
+      await ctx.db.patch(context.assignment.assignmentId, {
+        archivedAt: undefined,
+        archivedBy: undefined,
+      });
+      await ctx.db.patch(context.classroomId, {
+        archivedAt: Date.now(),
+        archivedBy: context.teacherId,
+      });
     });
     expect(await context.student.query(api.notifications.listMine, {})).toEqual([]);
   });

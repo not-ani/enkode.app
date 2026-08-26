@@ -4,6 +4,7 @@ import type { Doc } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { mutation, query } from "./_generated/server";
 import { requireAuthenticatedUser } from "./authorization";
+import { isArchived } from "./lifecycleGuards";
 import { releasePublicationStatus } from "./releasePolicy";
 
 type DatabaseCtx = QueryCtx | MutationCtx;
@@ -19,6 +20,13 @@ async function isCurrentlyAuthorized(
   ) {
     return false;
   }
+  const classroom = await ctx.db.get(notification.classroomId);
+  if (!classroom || classroom.organizationId !== user.organizationId || isArchived(classroom)) {
+    return false;
+  }
+  const course = await ctx.db.get(classroom.courseId);
+  if (!course || course.organizationId !== user.organizationId || isArchived(course)) return false;
+
   if (user.role === "teacher") {
     if (notification.type !== "submission_needs_review") return false;
     const [teacherAssignment, submission, release] = await Promise.all([
@@ -31,13 +39,22 @@ async function isCurrentlyAuthorized(
       notification.submissionId ? ctx.db.get(notification.submissionId) : null,
       notification.assignmentReleaseId ? ctx.db.get(notification.assignmentReleaseId) : null,
     ]);
+    if (
+      !teacherAssignment ||
+      !submission ||
+      !release ||
+      submission.assignmentReleaseId !== release._id ||
+      release.classroomId !== classroom._id ||
+      release.organizationId !== user.organizationId
+    ) {
+      return false;
+    }
+    const assignment = await ctx.db.get(release.assignmentId);
     return Boolean(
-      teacherAssignment &&
-      submission &&
-      release &&
-      submission.assignmentReleaseId === release._id &&
-      release.classroomId === notification.classroomId &&
-      release.organizationId === user.organizationId,
+      assignment &&
+      assignment.organizationId === user.organizationId &&
+      assignment.courseId === course._id &&
+      !isArchived(assignment),
     );
   }
   if (notification.type === "submission_needs_review") return false;
@@ -50,11 +67,16 @@ async function isCurrentlyAuthorized(
   if (!enrollment || enrollment.status !== "active") return false;
   if (notification.materialReleaseId) {
     const release = await ctx.db.get(notification.materialReleaseId);
+    const material = release ? await ctx.db.get(release.materialId) : null;
     return Boolean(
       release &&
-      release.classroomId === notification.classroomId &&
+      release.classroomId === classroom._id &&
       release.organizationId === user.organizationId &&
-      releasePublicationStatus(release) === "published",
+      releasePublicationStatus(release) === "published" &&
+      material &&
+      material.organizationId === user.organizationId &&
+      material.courseId === course._id &&
+      !isArchived(material),
     );
   }
   if (notification.assignmentReleaseId) {
@@ -62,11 +84,16 @@ async function isCurrentlyAuthorized(
       ctx.db.get(notification.assignmentReleaseId),
       notification.gradeReturnId ? ctx.db.get(notification.gradeReturnId) : null,
     ]);
+    const assignment = release ? await ctx.db.get(release.assignmentId) : null;
     return Boolean(
       release &&
-      release.classroomId === notification.classroomId &&
+      release.classroomId === classroom._id &&
       release.organizationId === user.organizationId &&
       releasePublicationStatus(release) === "published" &&
+      assignment &&
+      assignment.organizationId === user.organizationId &&
+      assignment.courseId === course._id &&
+      !isArchived(assignment) &&
       (notification.type !== "grade_returned" ||
         (gradeReturn &&
           gradeReturn.studentId === user._id &&
