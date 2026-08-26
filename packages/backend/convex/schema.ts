@@ -10,6 +10,16 @@ const releasePublicationState = v.union(
   v.literal("published"),
 );
 const materialKind = v.union(v.literal("rich_text"), v.literal("file"), v.literal("external_link"));
+const integritySignalType = v.union(
+  v.literal("large_paste"),
+  v.literal("unattributed_bulk_change"),
+  v.literal("work_history_gap"),
+);
+const integritySignalState = v.union(
+  v.literal("open"),
+  v.literal("reviewed"),
+  v.literal("dismissed"),
+);
 
 export default defineSchema({
   organizations: defineTable({
@@ -312,6 +322,30 @@ export default defineSchema({
     .index("by_workspace_attempt", ["workspaceId", "attemptNumber"])
     .index("by_workspace_idempotency", ["workspaceId", "idempotencyKey"])
     .index("by_release_student_attempt", ["assignmentReleaseId", "studentId", "attemptNumber"]),
+
+  integritySignals: defineTable({
+    organizationId: v.id("organizations"),
+    workspaceId: v.id("workspaces"),
+    studentId: v.id("users"),
+    type: integritySignalType,
+    state: integritySignalState,
+    evidenceKey: v.string(),
+    eventSequence: v.optional(v.number()),
+    path: v.optional(v.string()),
+    insertedCharacters: v.optional(v.number()),
+    deletedCharacters: v.optional(v.number()),
+    resultingFileCharacters: v.optional(v.number()),
+    contribution: v.optional(v.number()),
+    sequenceStart: v.optional(v.number()),
+    sequenceEnd: v.optional(v.number()),
+    gapReason: v.optional(v.string()),
+    createdAt: v.number(),
+    reviewedBy: v.optional(v.id("users")),
+    reviewedAt: v.optional(v.number()),
+    teacherNote: v.optional(v.string()),
+  })
+    .index("by_workspace", ["workspaceId", "createdAt"])
+    .index("by_evidence_key", ["evidenceKey"]),
 
   auditEvents: defineTable({
     organizationId: v.id("organizations"),

@@ -2,10 +2,11 @@ import { ConvexError, v } from "convex/values";
 
 import { internalMutation, internalQuery, query } from "./_generated/server";
 import { requireRole } from "./authorization";
+import { eventCandidate } from "./integritySignals";
 
 export const authorizeUpload = internalQuery({
-  args: { workspaceId: v.id("workspaces") },
-  handler: async (ctx, { workspaceId }) => {
+  args: { workspaceId: v.id("workspaces"), startSequence: v.number() },
+  handler: async (ctx, { workspaceId, startSequence }) => {
     const { organization, user } = await requireRole(ctx, "student");
     const workspace = await ctx.db.get(workspaceId);
     if (
@@ -15,7 +16,36 @@ export const authorizeUpload = internalQuery({
     ) {
       throw new ConvexError("Forbidden");
     }
-    return { organizationId: organization._id, studentId: user._id };
+    const previous = await ctx.db
+      .query("workHistoryChunks")
+      .withIndex("by_workspace_sequence", (index) =>
+        index.eq("workspaceId", workspaceId).lt("startSequence", startSequence),
+      )
+      .order("desc")
+      .first();
+    const exact = await ctx.db
+      .query("workHistoryChunks")
+      .withIndex("by_workspace_sequence", (index) =>
+        index.eq("workspaceId", workspaceId).eq("startSequence", startSequence),
+      )
+      .unique();
+    return {
+      organizationId: organization._id,
+      studentId: user._id,
+      acknowledgedThrough: workspace.historyAckSequence ?? 0,
+      exact,
+      previous:
+        previous?.snapshotHash &&
+        previous.snapshotObjectKey &&
+        previous.snapshotByteLength !== undefined
+          ? {
+              manifest: previous,
+              objectKey: previous.snapshotObjectKey,
+              contentHash: previous.snapshotHash,
+              byteLength: previous.snapshotByteLength,
+            }
+          : undefined,
+    };
   },
 });
 
@@ -33,6 +63,7 @@ export const commitChunk = internalMutation({
     snapshotHash: v.optional(v.string()),
     snapshotObjectKey: v.optional(v.string()),
     snapshotByteLength: v.optional(v.number()),
+    signalCandidates: v.optional(v.array(eventCandidate)),
   },
   handler: async (ctx, manifest) => {
     const workspace = await ctx.db.get(manifest.workspaceId);
@@ -82,10 +113,31 @@ export const commitChunk = internalMutation({
     }
 
     await ctx.db.insert("workHistoryChunks", {
-      ...manifest,
+      workspaceId: manifest.workspaceId,
+      organizationId: manifest.organizationId,
+      studentId: manifest.studentId,
+      startSequence: manifest.startSequence,
+      endSequence: manifest.endSequence,
+      eventCount: manifest.eventCount,
+      contentHash: manifest.contentHash,
+      objectKey: manifest.objectKey,
+      byteLength: manifest.byteLength,
+      snapshotHash: manifest.snapshotHash,
+      snapshotObjectKey: manifest.snapshotObjectKey,
+      snapshotByteLength: manifest.snapshotByteLength,
       encoding: "gzip-json-v1",
       committedAt: Date.now(),
     });
+    for (const candidate of manifest.signalCandidates ?? []) {
+      await ctx.db.insert("integritySignals", {
+        organizationId: manifest.organizationId,
+        workspaceId: manifest.workspaceId,
+        studentId: manifest.studentId,
+        state: "open",
+        createdAt: Date.now(),
+        ...candidate,
+      });
+    }
     await ctx.db.patch(workspace._id, { historyAckSequence: manifest.endSequence });
     return { acknowledgedThrough: manifest.endSequence };
   },

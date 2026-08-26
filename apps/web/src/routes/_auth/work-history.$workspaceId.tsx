@@ -1,9 +1,10 @@
 import { api } from "@enkode.app/backend/convex/_generated/api";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useAction, useQuery } from "convex/react";
+import { useAction, useMutation, useQuery } from "convex/react";
 import { useCallback } from "react";
 
 import WorkHistoryReplay, { type ReplayPage } from "@/components/work-history-replay";
+import IntegritySignalReview, { type IntegritySignal } from "@/components/integrity-signal-review";
 
 export const Route = createFileRoute("/_auth/work-history/$workspaceId")({
   component: WorkHistoryRoute,
@@ -24,6 +25,12 @@ function WorkHistoryRoute() {
     | Description
     | undefined;
   const readNext = useAction(api.workHistoryReplayRead.readNext);
+  const inspectSignal = useAction(api.integritySignalEvidence.inspect);
+  const reviewSignal = useMutation(api.integritySignals.review);
+  const signals = useQuery(
+    api.integritySignals.listForWorkspace,
+    description?.viewerRole === "teacher" ? { workspaceId } : "skip",
+  ) as IntegritySignal[] | undefined;
   const loadPage = useCallback(
     async (afterSequence: number) =>
       (await readNext({ workspaceId, afterSequence })) as ReplayPage | undefined,
@@ -55,6 +62,19 @@ function WorkHistoryRoute() {
           </p>
         </header>
         <WorkHistoryReplay committedThrough={description.committedThrough} loadPage={loadPage} />
+        {description.viewerRole === "teacher" ? (
+          signals ? (
+            <IntegritySignalReview
+              signals={signals}
+              inspect={async (signalId) => await inspectSignal({ signalId })}
+              review={async (signalId, state, note) =>
+                await reviewSignal({ signalId, state, note })
+              }
+            />
+          ) : (
+            <p className="text-sm text-muted-foreground">Loading Integrity Signals…</p>
+          )
+        ) : null}
       </div>
     </main>
   );
