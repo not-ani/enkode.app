@@ -5,6 +5,7 @@ import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { internalMutation, internalQuery, mutation, query } from "./_generated/server";
 import { requireClassroomTeacher, requireRole } from "./authorization";
 import { transitionIntegritySignal } from "./integritySignalPolicy";
+import { requireWritableAssignmentRelease } from "./lifecycleGuards";
 
 export const eventCandidate = v.object({
   type: v.union(v.literal("large_paste"), v.literal("unattributed_bulk_change")),
@@ -214,7 +215,8 @@ export const review = mutation({
     note: v.optional(v.string()),
   },
   handler: async (ctx, { signalId, state, note }) => {
-    const { signal, user } = await requireSignalTeacher(ctx, signalId);
+    const { signal, user, workspace } = await requireSignalTeacher(ctx, signalId);
+    await requireWritableAssignmentRelease(ctx, workspace.assignmentReleaseId);
     let next;
     try {
       next = transitionIntegritySignal(signal.state, state);

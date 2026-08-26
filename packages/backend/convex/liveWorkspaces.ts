@@ -5,6 +5,7 @@ import { internal } from "./_generated/api";
 import { internalMutation, mutation, query } from "./_generated/server";
 import { appendAuditEvent } from "./audit";
 import { requireClassroomTeacher, requireRole } from "./authorization";
+import { requireWritableAssignmentRelease } from "./lifecycleGuards";
 
 export const VIEWER_PRESENCE_TTL_MS = 45_000;
 
@@ -14,6 +15,7 @@ async function requireActiveWorkspaceStudent(
 ) {
   const release = await ctx.db.get(workspace.assignmentReleaseId);
   if (!release) throw new ConvexError("Workspace Assignment Release is unavailable");
+  await requireWritableAssignmentRelease(ctx, release._id);
   const authenticated = await requireClassroomTeacher(ctx, release.classroomId);
   if (workspace.organizationId !== authenticated.organization._id) {
     throw new ConvexError("Forbidden");
@@ -56,7 +58,12 @@ export const listForTeacher = query({
     const rows = await Promise.all(
       assignments.map(async ({ classroomId }) => {
         const classroom = await ctx.db.get(classroomId);
-        if (!classroom || classroom.organizationId !== organization._id) return [];
+        if (
+          !classroom ||
+          classroom.organizationId !== organization._id ||
+          classroom.archivedAt !== undefined
+        )
+          return [];
         const enrollments = await ctx.db
           .query("enrollments")
           .withIndex("by_classroom", (index) => index.eq("classroomId", classroomId))
@@ -72,7 +79,7 @@ export const listForTeacher = query({
           await Promise.all(
             releases.map(async (release) => {
               const assignment = await ctx.db.get(release.assignmentId);
-              if (!assignment) return [];
+              if (!assignment || assignment.archivedAt !== undefined) return [];
               const workspaces = await ctx.db
                 .query("workspaces")
                 .withIndex("by_release_student", (index) =>

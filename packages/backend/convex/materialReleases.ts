@@ -6,6 +6,12 @@ import { internal } from "./_generated/api";
 import { internalMutation, mutation, query } from "./_generated/server";
 import { appendAuditEvent } from "./audit";
 import { requireClassroomTeacher, requireRole } from "./authorization";
+import {
+  isArchived,
+  requireWritableClassroom,
+  requireWritableMaterial,
+  requireWritableMaterialRelease,
+} from "./lifecycleGuards";
 import { adjacentOrder, releasePublicationStatus, validateScheduledFor } from "./releasePolicy";
 
 const publication = v.union(
@@ -70,8 +76,7 @@ async function requireEditableRelease(
   ctx: Parameters<typeof requireClassroomTeacher>[0],
   materialReleaseId: Id<"materialReleases">,
 ) {
-  const release = await ctx.db.get(materialReleaseId);
-  if (!release) throw new ConvexError("Material Release not found");
+  const release = await requireWritableMaterialRelease(ctx, materialReleaseId);
   const authenticated = await requireClassroomTeacher(ctx, release.classroomId);
   return { ...authenticated, release };
 }
@@ -99,19 +104,21 @@ export const availableVersions = query({
       .withIndex("by_course", (index) => index.eq("courseId", classroom.courseId))
       .collect();
     const options = await Promise.all(
-      materials.map(async (material) => {
-        const versions = await ctx.db
-          .query("materialVersions")
-          .withIndex("by_material", (index) => index.eq("materialId", material._id))
-          .collect();
-        return versions.map((version) => ({
-          materialId: material._id,
-          materialTitle: material.title,
-          materialVersionId: version._id,
-          version: version.version,
-          kind: version.kind,
-        }));
-      }),
+      materials
+        .filter(({ archivedAt }) => archivedAt === undefined)
+        .map(async (material) => {
+          const versions = await ctx.db
+            .query("materialVersions")
+            .withIndex("by_material", (index) => index.eq("materialId", material._id))
+            .collect();
+          return versions.map((version) => ({
+            materialId: material._id,
+            materialTitle: material.title,
+            materialVersionId: version._id,
+            version: version.version,
+            kind: version.kind,
+          }));
+        }),
     );
     return options
       .flat()
@@ -131,6 +138,7 @@ export const create = mutation({
   },
   handler: async (ctx, { classroomId, materialVersionId, publication = "immediate" }) => {
     const { classroom, organization, user } = await requireClassroomTeacher(ctx, classroomId);
+    await requireWritableClassroom(ctx, classroomId);
     const version = await ctx.db.get(materialVersionId);
     if (!version || version.organizationId !== organization._id) {
       throw new ConvexError("Material Version not found");
@@ -139,6 +147,7 @@ export const create = mutation({
     if (!material || material.courseId !== classroom.courseId) {
       throw new ConvexError("Material Version does not belong to this Classroom's Course");
     }
+    await requireWritableMaterial(ctx, material._id);
     const existing = await ctx.db
       .query("materialReleases")
       .withIndex("by_classroom_material", (index) =>
@@ -294,6 +303,11 @@ export const publishScheduled = internalMutation({
       scheduledFor > Date.now()
     )
       return;
+    const [classroom, material] = await Promise.all([
+      ctx.db.get(release.classroomId),
+      ctx.db.get(release.materialId),
+    ]);
+    if (!classroom || !material || isArchived(classroom) || isArchived(material)) return;
     await ctx.db.patch(release._id, {
       publicationState: "published",
       scheduledFor: undefined,
@@ -317,7 +331,12 @@ export const listForClassroom = query({
       .query("materialReleases")
       .withIndex("by_classroom", (index) => index.eq("classroomId", classroomId))
       .collect();
-    return await Promise.all(releases.map((release) => releaseSummary(ctx, release)));
+    const active = [];
+    for (const release of releases) {
+      const material = await ctx.db.get(release.materialId);
+      if (material?.archivedAt === undefined) active.push(release);
+    }
+    return await Promise.all(active.map((release) => releaseSummary(ctx, release)));
   },
 });
 
@@ -355,14 +374,25 @@ export const listMine = query({
     const groups = await Promise.all(
       enrollments.map(async (enrollment) => {
         const classroom = await ctx.db.get(enrollment.classroomId);
-        if (!classroom || classroom.organizationId !== user.organizationId) return [];
+        if (
+          !classroom ||
+          classroom.organizationId !== user.organizationId ||
+          classroom.archivedAt !== undefined
+        )
+          return [];
         const releases = await ctx.db
           .query("materialReleases")
           .withIndex("by_classroom", (index) => index.eq("classroomId", classroom._id))
           .collect();
-        const published = releases.filter(
-          (release) => releasePublicationStatus(release) === "published",
-        );
+        const published = [];
+        for (const release of releases) {
+          const material = await ctx.db.get(release.materialId);
+          if (
+            releasePublicationStatus(release) === "published" &&
+            material?.archivedAt === undefined
+          )
+            published.push(release);
+        }
         return await Promise.all(
           published.map(async (release) => ({
             ...(await releaseSummary(ctx, release)),

@@ -9,6 +9,12 @@ import { mergePlan } from "./assignmentVersionMerge";
 import { appendAuditEvent } from "./audit";
 import { requireClassroomTeacher, requireRole } from "./authorization";
 import {
+  isArchived,
+  requireWritableAssignment,
+  requireWritableAssignmentRelease,
+  requireWritableClassroom,
+} from "./lifecycleGuards";
+import {
   adjacentOrder,
   releasePublicationStatus,
   validateReleasePoints,
@@ -80,8 +86,7 @@ async function requireEditableRelease(
   ctx: Parameters<typeof requireClassroomTeacher>[0],
   assignmentReleaseId: Id<"assignmentReleases">,
 ) {
-  const release = await ctx.db.get(assignmentReleaseId);
-  if (!release) throw new ConvexError("Assignment Release not found");
+  const release = await requireWritableAssignmentRelease(ctx, assignmentReleaseId);
   const authenticated = await requireClassroomTeacher(ctx, release.classroomId);
   return { ...authenticated, release };
 }
@@ -109,20 +114,22 @@ export const availableVersions = query({
       .withIndex("by_course", (index) => index.eq("courseId", classroom.courseId))
       .collect();
     const options = await Promise.all(
-      assignments.map(async (assignment) => {
-        const versions = await ctx.db
-          .query("assignmentVersions")
-          .withIndex("by_assignment", (index) => index.eq("assignmentId", assignment._id))
-          .collect();
-        return versions.map((version) => ({
-          assignmentId: assignment._id,
-          assignmentTitle: assignment.title,
-          assignmentVersionId: version._id,
-          version: version.version,
-          language: version.language,
-          runtimeVersion: version.runtimeVersion,
-        }));
-      }),
+      assignments
+        .filter(({ archivedAt }) => archivedAt === undefined)
+        .map(async (assignment) => {
+          const versions = await ctx.db
+            .query("assignmentVersions")
+            .withIndex("by_assignment", (index) => index.eq("assignmentId", assignment._id))
+            .collect();
+          return versions.map((version) => ({
+            assignmentId: assignment._id,
+            assignmentTitle: assignment.title,
+            assignmentVersionId: version._id,
+            version: version.version,
+            language: version.language,
+            runtimeVersion: version.runtimeVersion,
+          }));
+        }),
     );
     return options
       .flat()
@@ -143,6 +150,7 @@ export const create = mutation({
   },
   handler: async (ctx, { classroomId, assignmentVersionId, points, publication = "immediate" }) => {
     const { classroom, organization, user } = await requireClassroomTeacher(ctx, classroomId);
+    await requireWritableClassroom(ctx, classroomId);
     const version = await ctx.db.get(assignmentVersionId);
     if (!version || version.organizationId !== organization._id) {
       throw new ConvexError("Assignment Version not found");
@@ -151,6 +159,7 @@ export const create = mutation({
     if (!assignment || assignment.courseId !== classroom.courseId) {
       throw new ConvexError("Assignment Version does not belong to this Classroom's Course");
     }
+    await requireWritableAssignment(ctx, assignment._id);
     const existing = await ctx.db
       .query("assignmentReleases")
       .withIndex("by_classroom_assignment", (index) =>
@@ -295,6 +304,11 @@ export const publishScheduled = internalMutation({
     ) {
       return;
     }
+    const [classroom, assignment] = await Promise.all([
+      ctx.db.get(release.classroomId),
+      ctx.db.get(release.assignmentId),
+    ]);
+    if (!classroom || !assignment || isArchived(classroom) || isArchived(assignment)) return;
     await ctx.db.patch(release._id, {
       publicationState: "published",
       scheduledFor: undefined,
@@ -318,7 +332,12 @@ export const listForClassroom = query({
       .query("assignmentReleases")
       .withIndex("by_classroom", (index) => index.eq("classroomId", classroomId))
       .collect();
-    return await Promise.all(releases.map((release) => releaseSummary(ctx, release)));
+    const active = [];
+    for (const release of releases) {
+      const assignment = await ctx.db.get(release.assignmentId);
+      if (assignment?.archivedAt === undefined) active.push(release);
+    }
+    return await Promise.all(active.map((release) => releaseSummary(ctx, release)));
   },
 });
 
@@ -404,8 +423,7 @@ export const move = mutation({
     direction: v.union(v.literal("up"), v.literal("down")),
   },
   handler: async (ctx, { assignmentReleaseId, direction }) => {
-    const release = await ctx.db.get(assignmentReleaseId);
-    if (!release) throw new ConvexError("Assignment Release not found");
+    const release = await requireWritableAssignmentRelease(ctx, assignmentReleaseId);
     const { organization, user } = await requireClassroomTeacher(ctx, release.classroomId);
     const releases = await ctx.db
       .query("assignmentReleases")
@@ -439,14 +457,25 @@ export const listMine = query({
     const groups = await Promise.all(
       enrollments.map(async (enrollment) => {
         const classroom = await ctx.db.get(enrollment.classroomId);
-        if (!classroom || classroom.organizationId !== user.organizationId) return [];
+        if (
+          !classroom ||
+          classroom.organizationId !== user.organizationId ||
+          classroom.archivedAt !== undefined
+        )
+          return [];
         const releases = await ctx.db
           .query("assignmentReleases")
           .withIndex("by_classroom", (index) => index.eq("classroomId", classroom._id))
           .collect();
-        const published = releases.filter(
-          (release) => releasePublicationStatus(release) === "published",
-        );
+        const published = [];
+        for (const release of releases) {
+          const assignment = await ctx.db.get(release.assignmentId);
+          if (
+            releasePublicationStatus(release) === "published" &&
+            assignment?.archivedAt === undefined
+          )
+            published.push(release);
+        }
         return await Promise.all(
           published.map(async (release) => ({
             ...(await releaseSummary(ctx, release)),

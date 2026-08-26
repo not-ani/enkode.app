@@ -3,6 +3,7 @@ import { ConvexError, v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import { appendAuditEvent } from "./audit";
 import { requireClassroomTeacher, requireCourseCollaborator, requireRole } from "./authorization";
+import { requireWritableClassroom, requireWritableCourse } from "./lifecycleGuards";
 
 function cleanName(name: string) {
   const cleaned = name.trim();
@@ -36,6 +37,7 @@ export const create = mutation({
   args: { courseId: v.id("courses"), name: v.string() },
   handler: async (ctx, { courseId, name }) => {
     const { organization, user } = await requireCourseCollaborator(ctx, courseId);
+    await requireWritableCourse(ctx, courseId);
     const classroomId = await ctx.db.insert("classrooms", {
       organizationId: organization._id,
       courseId,
@@ -86,6 +88,7 @@ export const listMine = query({
     );
     return classrooms
       .filter((classroom) => classroom !== null)
+      .filter(({ archivedAt }) => archivedAt === undefined)
       .sort((left, right) => left.name.localeCompare(right.name));
   },
 });
@@ -108,6 +111,7 @@ export const update = mutation({
   args: { classroomId: v.id("classrooms"), name: v.string() },
   handler: async (ctx, { classroomId, name }) => {
     const { classroom, organization, user } = await requireClassroomTeacher(ctx, classroomId);
+    await requireWritableClassroom(ctx, classroomId);
     await ctx.db.patch(classroom._id, { name: cleanName(name) });
     await appendAuditEvent(ctx, {
       organizationId: organization._id,
@@ -122,6 +126,7 @@ export const addTeacher = mutation({
   args: { classroomId: v.id("classrooms"), username: v.string() },
   handler: async (ctx, { classroomId, username }) => {
     const { organization, user } = await requireClassroomTeacher(ctx, classroomId);
+    await requireWritableClassroom(ctx, classroomId);
     const teacher = await ctx.db
       .query("users")
       .withIndex("by_organization_username", (index) =>
@@ -157,6 +162,7 @@ export const removeTeacher = mutation({
   args: { classroomId: v.id("classrooms"), teacherId: v.id("users") },
   handler: async (ctx, { classroomId, teacherId }) => {
     const { organization, user } = await requireClassroomTeacher(ctx, classroomId);
+    await requireWritableClassroom(ctx, classroomId);
     const assignment = await ctx.db
       .query("classroomTeachers")
       .withIndex("by_classroom_teacher", (index) =>

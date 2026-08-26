@@ -3,6 +3,7 @@ import { ConvexError, v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import { appendAuditEvent } from "./audit";
 import { requireClassroomTeacher, requireRole } from "./authorization";
+import { requireWritableClassroom } from "./lifecycleGuards";
 
 export const listForClassroom = query({
   args: { classroomId: v.id("classrooms") },
@@ -48,7 +49,12 @@ export const listMine = query({
     const classrooms = await Promise.all(
       enrollments.map(async (enrollment) => {
         const classroom = await ctx.db.get(enrollment.classroomId);
-        if (!classroom || classroom.organizationId !== user.organizationId) return null;
+        if (
+          !classroom ||
+          classroom.organizationId !== user.organizationId ||
+          classroom.archivedAt !== undefined
+        )
+          return null;
         const course = await ctx.db.get(classroom.courseId);
         if (!course || course.organizationId !== user.organizationId) return null;
         return {
@@ -70,6 +76,7 @@ export const enroll = mutation({
   args: { classroomId: v.id("classrooms"), studentId: v.id("users") },
   handler: async (ctx, { classroomId, studentId }) => {
     const { organization, user } = await requireClassroomTeacher(ctx, classroomId);
+    await requireWritableClassroom(ctx, classroomId);
     const student = await ctx.db.get(studentId);
     if (!student || student.role !== "student" || student.organizationId !== organization._id) {
       throw new ConvexError("Student not found in this organization");
@@ -111,6 +118,7 @@ export const end = mutation({
     const enrollment = await ctx.db.get(enrollmentId);
     if (!enrollment) throw new ConvexError("Enrollment not found");
     const { organization, user } = await requireClassroomTeacher(ctx, enrollment.classroomId);
+    await requireWritableClassroom(ctx, enrollment.classroomId);
     if (enrollment.organizationId !== organization._id) throw new ConvexError("Forbidden");
     if (enrollment.status !== "active") throw new ConvexError("Enrollment is already ended");
 
@@ -130,6 +138,7 @@ export const restore = mutation({
     const enrollment = await ctx.db.get(enrollmentId);
     if (!enrollment) throw new ConvexError("Enrollment not found");
     const { organization, user } = await requireClassroomTeacher(ctx, enrollment.classroomId);
+    await requireWritableClassroom(ctx, enrollment.classroomId);
     if (enrollment.organizationId !== organization._id) throw new ConvexError("Forbidden");
     if (enrollment.status !== "ended") throw new ConvexError("Enrollment is already active");
 

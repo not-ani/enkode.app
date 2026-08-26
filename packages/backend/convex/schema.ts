@@ -53,6 +53,8 @@ export default defineSchema({
     organizationId: v.id("organizations"),
     name: v.string(),
     description: v.optional(v.string()),
+    archivedAt: v.optional(v.number()),
+    archivedBy: v.optional(v.id("users")),
   }).index("by_organization", ["organizationId"]),
 
   courseCollaborators: defineTable({
@@ -69,6 +71,8 @@ export default defineSchema({
     courseId: v.id("courses"),
     title: v.string(),
     latestVersion: v.number(),
+    archivedAt: v.optional(v.number()),
+    archivedBy: v.optional(v.id("users")),
   })
     .index("by_course", ["courseId"])
     .index("by_organization", ["organizationId"]),
@@ -115,6 +119,8 @@ export default defineSchema({
     courseId: v.id("courses"),
     title: v.string(),
     latestVersion: v.number(),
+    archivedAt: v.optional(v.number()),
+    archivedBy: v.optional(v.id("users")),
   })
     .index("by_course", ["courseId"])
     .index("by_organization", ["organizationId"]),
@@ -150,6 +156,8 @@ export default defineSchema({
     organizationId: v.id("organizations"),
     courseId: v.id("courses"),
     name: v.string(),
+    archivedAt: v.optional(v.number()),
+    archivedBy: v.optional(v.id("users")),
   })
     .index("by_organization", ["organizationId"])
     .index("by_course", ["courseId"]),

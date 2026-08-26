@@ -6,6 +6,7 @@ import { mutation } from "./_generated/server";
 import { applyStarterMerge, mergePlan, starterFilesFor } from "./assignmentVersionMerge";
 import { appendAuditEvent } from "./audit";
 import { requireRole } from "./authorization";
+import { requireWritableAssignmentRelease } from "./lifecycleGuards";
 import { releasePublicationStatus } from "./releasePolicy";
 
 const workspaceFile = v.object({ path: v.string(), content: v.string() });
@@ -23,6 +24,7 @@ async function requireStudentRelease(
   ) {
     throw new ConvexError("Forbidden");
   }
+  await requireWritableAssignmentRelease(ctx, assignmentReleaseId);
   const enrollment = await ctx.db
     .query("enrollments")
     .withIndex("by_classroom_student", (index) =>

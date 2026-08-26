@@ -5,6 +5,8 @@ import { Textarea } from "@enkode.app/ui/components/textarea";
 import { useMutation, useQuery } from "convex/react";
 import { useState, type FormEvent } from "react";
 
+import ArchiveActions from "./archive-actions";
+
 type Material = { _id: string; title: string; latestVersion: number };
 type MaterialKind = "rich_text" | "external_link" | "file";
 
@@ -64,6 +66,18 @@ export default function MaterialAuthoring({ courseId }: { courseId: string }) {
       <summary className="cursor-pointer font-medium text-base sm:text-sm">
         Author Materials
       </summary>
+      {materials?.length ? (
+        <ul className="mt-4 flex flex-col gap-2" role="list">
+          {materials.map((material) => (
+            <li className="flex items-center justify-between gap-3 text-sm" key={material._id}>
+              <span>
+                {material.title} · Version {material.latestVersion}
+              </span>
+              <ArchiveActions id={material._id} target="material" />
+            </li>
+          ))}
+        </ul>
+      ) : null}
       <form className="mt-4 flex flex-col gap-3" onSubmit={save}>
         <label className="flex flex-col gap-1 text-base sm:text-sm">
           Save as

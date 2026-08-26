@@ -6,6 +6,7 @@ import { mutation, query } from "./_generated/server";
 import { appendAuditEvent } from "./audit";
 import { requireClassroomTeacher, requireRole } from "./authorization";
 import { deriveAssignmentStatus, validateGradePoints, validateInlineFeedback } from "./gradePolicy";
+import { requireWritableAssignmentRelease } from "./lifecycleGuards";
 
 const inlineFeedbackInput = v.object({
   path: v.string(),
@@ -188,6 +189,7 @@ export const saveDraft = mutation({
       ctx,
       input.submissionId,
     );
+    await requireWritableAssignmentRelease(ctx, release._id);
     const points = validateGradePoints(input.points, release.points);
     const inlineFeedback = input.inlineFeedback.map((feedback) => {
       const snapshotFile = snapshot.files.find(({ path }) => path === feedback.path.trim());
@@ -236,6 +238,7 @@ export const returnGrade = mutation({
     const grade = await ctx.db.get(gradeId);
     if (!grade) throw new ConvexError("Grade not found");
     const { release, submission, user } = await requireTeacherSubmission(ctx, grade.submissionId);
+    await requireWritableAssignmentRelease(ctx, release._id);
     if (
       grade.assignmentReleaseId !== submission.assignmentReleaseId ||
       grade.studentId !== submission.studentId
