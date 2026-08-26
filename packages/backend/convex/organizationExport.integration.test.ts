@@ -301,10 +301,13 @@ async function seed(test: ReturnType<typeof backend>) {
     });
     await ctx.db.insert("auditEvents", {
       organizationId,
-      actorKind: "developer",
-      action: "organization.provisioned",
-      targetKind: "organization",
-      targetId: organizationId,
+      courseId,
+      classroomId,
+      actorKind: "user",
+      actorUserId: teacherId,
+      action: "grade.returned",
+      targetKind: "grade_return",
+      targetId: gradeReturnId,
       occurredAt: 1,
     });
     const attachmentId = await ctx.db.insert("materialAttachments", {
@@ -347,7 +350,7 @@ async function seed(test: ReturnType<typeof backend>) {
       createdBy: teacherId,
       createdAt: 3,
     });
-    return { courseId, gradeId, organizationId };
+    return { classroomId, courseId, gradeId, gradeReturnId, organizationId, teacherId };
   });
   return { attachment, history, historySnapshot, ids, submissionSnapshot };
 }
@@ -424,7 +427,14 @@ describe("Organization Export", () => {
     expect(bundle.records.runs).toHaveLength(1);
     expect(bundle.records.materialReleases).toHaveLength(1);
     expect(bundle.records.integritySignals).toHaveLength(1);
-    expect(bundle.records.auditEvents).toHaveLength(1);
+    expect(bundle.records.auditEvents[0]).toMatchObject({
+      courseId: seeded.ids.courseId,
+      classroomId: seeded.ids.classroomId,
+      actorUserId: seeded.ids.teacherId,
+      action: "grade.returned",
+      targetKind: "grade_return",
+      targetId: seeded.ids.gradeReturnId,
+    });
     expect(bundle.objects).toHaveLength(4);
     expect(bundle.objects.map((object) => object.sha256).sort()).toEqual(
       [seeded.attachment, seeded.history, seeded.historySnapshot, seeded.submissionSnapshot]
