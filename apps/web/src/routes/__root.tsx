@@ -71,12 +71,12 @@ function RootDocument() {
       authClient={authClient}
       initialToken={context.token}
     >
-      <html lang="en" className="dark">
+      <html lang="en" className="dark antialiased">
         <head>
           <HeadContent />
         </head>
         <body>
-          <div className="grid h-svh grid-rows-[auto_1fr]">
+          <div className="isolate grid h-svh grid-rows-[auto_1fr]">
             <Header />
             <Outlet />
           </div>

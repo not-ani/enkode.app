@@ -44,3 +44,43 @@ export function requireOrganization(
     throw new ConvexError("Forbidden");
   }
 }
+
+export async function requireCourseCollaborator(ctx: DatabaseCtx, courseId: Id<"courses">) {
+  const authenticated = await requireRole(ctx, "teacher");
+  const course = await ctx.db.get(courseId);
+  if (!course || course.organizationId !== authenticated.organization._id) {
+    throw new ConvexError("Forbidden");
+  }
+
+  const assignment = await ctx.db
+    .query("courseCollaborators")
+    .withIndex("by_course_teacher", (query) =>
+      query.eq("courseId", courseId).eq("teacherId", authenticated.user._id),
+    )
+    .unique();
+  if (!assignment) {
+    throw new ConvexError("Forbidden");
+  }
+
+  return { ...authenticated, assignment, course };
+}
+
+export async function requireClassroomTeacher(ctx: DatabaseCtx, classroomId: Id<"classrooms">) {
+  const authenticated = await requireRole(ctx, "teacher");
+  const classroom = await ctx.db.get(classroomId);
+  if (!classroom || classroom.organizationId !== authenticated.organization._id) {
+    throw new ConvexError("Forbidden");
+  }
+
+  const assignment = await ctx.db
+    .query("classroomTeachers")
+    .withIndex("by_classroom_teacher", (query) =>
+      query.eq("classroomId", classroomId).eq("teacherId", authenticated.user._id),
+    )
+    .unique();
+  if (!assignment) {
+    throw new ConvexError("Forbidden");
+  }
+
+  return { ...authenticated, assignment, classroom };
+}

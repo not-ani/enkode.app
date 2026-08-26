@@ -21,6 +21,38 @@ export default defineSchema({
     .index("by_organization_username", ["organizationId", "username"])
     .index("by_organization_email", ["organizationId", "email"]),
 
+  courses: defineTable({
+    organizationId: v.id("organizations"),
+    name: v.string(),
+    description: v.optional(v.string()),
+  }).index("by_organization", ["organizationId"]),
+
+  courseCollaborators: defineTable({
+    organizationId: v.id("organizations"),
+    courseId: v.id("courses"),
+    teacherId: v.id("users"),
+  })
+    .index("by_course", ["courseId"])
+    .index("by_course_teacher", ["courseId", "teacherId"])
+    .index("by_teacher", ["teacherId"]),
+
+  classrooms: defineTable({
+    organizationId: v.id("organizations"),
+    courseId: v.id("courses"),
+    name: v.string(),
+  })
+    .index("by_organization", ["organizationId"])
+    .index("by_course", ["courseId"]),
+
+  classroomTeachers: defineTable({
+    organizationId: v.id("organizations"),
+    classroomId: v.id("classrooms"),
+    teacherId: v.id("users"),
+  })
+    .index("by_classroom", ["classroomId"])
+    .index("by_classroom_teacher", ["classroomId", "teacherId"])
+    .index("by_teacher", ["teacherId"]),
+
   auditEvents: defineTable({
     organizationId: v.id("organizations"),
     actorKind: v.union(v.literal("developer"), v.literal("user")),
