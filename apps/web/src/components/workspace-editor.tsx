@@ -35,6 +35,24 @@ type WorkspaceEditorProps = {
   runtimeVersion: string;
   onSave: (files: WorkspaceFile[]) => Promise<void>;
   onUploadHistory: (chunk: WorkHistoryChunk) => Promise<{ acknowledgedThrough: number }>;
+  onRun: (files: WorkspaceFile[]) => Promise<RunResult>;
+};
+
+export type RunResult = {
+  runId: string;
+  execution: {
+    status: "completed" | "failed" | "timed_out";
+    stdout: string;
+    stderr: string;
+    exitCode: number | null;
+  };
+  publicTestResults: {
+    name: string;
+    passed: boolean;
+    stdout: string;
+    stderr: string;
+    exitCode: number | null;
+  }[];
 };
 
 export default function WorkspaceEditor({
@@ -45,6 +63,7 @@ export default function WorkspaceEditor({
   runtimeVersion,
   onSave,
   onUploadHistory,
+  onRun,
 }: WorkspaceEditorProps) {
   const draftStore = useMemo(
     () =>
@@ -62,6 +81,8 @@ export default function WorkspaceEditor({
     workspaceDraftMatches(workspaceId, files, restoredDraft) ? "dirty" : "saved",
   );
   const [error, setError] = useState<string>();
+  const [runState, setRunState] = useState<"idle" | "running">("idle");
+  const [runResult, setRunResult] = useState<RunResult>();
   const languageService = useMemo(
     () =>
       new RemotePythonLanguageService(
@@ -217,6 +238,28 @@ export default function WorkspaceEditor({
     }
   }
 
+  async function run() {
+    setRunState("running");
+    setRunResult(undefined);
+    setError(undefined);
+    try {
+      const result = await onRun(state.files);
+      setRunResult(result);
+      historyRecorder.current?.recordRun({
+        runId: result.runId,
+        status: result.execution.status,
+        stdout: result.execution.stdout,
+        stderr: result.execution.stderr,
+        exitCode: result.execution.exitCode,
+        publicTestResults: result.publicTestResults,
+      });
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not Run this Workspace");
+    } finally {
+      setRunState("idle");
+    }
+  }
+
   return (
     <section className="grid min-h-[36rem] overflow-hidden border border-foreground/10 lg:grid-cols-[13rem_minmax(0,1fr)]">
       <aside className="border-b border-foreground/10 bg-muted/30 lg:border-r lg:border-b-0">
@@ -254,6 +297,14 @@ export default function WorkspaceEditor({
             <p aria-live="polite" className="text-xs text-muted-foreground">
               {saveState === "dirty" ? "Unsaved" : saveState === "saving" ? "Saving…" : "Saved"}
             </p>
+            <Button
+              type="button"
+              size="sm"
+              disabled={runState === "running"}
+              onClick={() => void run()}
+            >
+              {runState === "running" ? "Running…" : "Run"}
+            </Button>
             <Button
               type="button"
               size="sm"
@@ -297,6 +348,59 @@ export default function WorkspaceEditor({
           </Suspense>
         </div>
       </div>
+      {runResult ? <RunResults result={runResult} /> : null}
+    </section>
+  );
+}
+
+function RunResults({ result }: { result: RunResult }) {
+  const passed = result.publicTestResults.filter((test) => test.passed).length;
+  return (
+    <section
+      className="border-t border-foreground/10 bg-muted/20 p-4 lg:col-span-2"
+      aria-label="Run results"
+    >
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2 className="font-medium">Run results</h2>
+        <p className="text-sm text-muted-foreground">
+          {result.publicTestResults.length === 0
+            ? result.execution.status === "completed"
+              ? "Completed"
+              : "Execution failed"
+            : `${passed} of ${result.publicTestResults.length} public tests passed`}
+        </p>
+      </div>
+      {result.execution.stdout ? (
+        <pre
+          className="mt-3 overflow-x-auto bg-background p-3 text-sm"
+          aria-label="Standard output"
+        >
+          {result.execution.stdout}
+        </pre>
+      ) : null}
+      {result.execution.stderr ? (
+        <pre
+          className="mt-3 overflow-x-auto bg-background p-3 text-sm text-destructive"
+          aria-label="Standard error"
+        >
+          {result.execution.stderr}
+        </pre>
+      ) : null}
+      {result.publicTestResults.length > 0 ? (
+        <ul className="mt-3 grid gap-2">
+          {result.publicTestResults.map((test, index) => (
+            <li
+              className="flex items-center justify-between border border-foreground/10 bg-background px-3 py-2 text-sm"
+              key={`${test.name}-${index}`}
+            >
+              <span>{test.name}</span>
+              <span className={test.passed ? "text-emerald-700" : "text-destructive"}>
+                {test.passed ? "Passed" : "Failed"}
+              </span>
+            </li>
+          ))}
+        </ul>
+      ) : null}
     </section>
   );
 }
