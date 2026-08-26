@@ -228,7 +228,7 @@ export default function AssignmentReleases({ classrooms }: { classrooms: Classro
             </Button>
           </form>
           <p className="text-muted-foreground text-base sm:text-sm">
-            New releases are published immediately and allow unlimited submissions.
+            Releases allow unlimited submissions whether published now or scheduled for later.
           </p>
           {releases?.length === 0 ? (
             <p className="text-muted-foreground text-base sm:text-sm">

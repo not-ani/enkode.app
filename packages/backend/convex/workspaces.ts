@@ -4,21 +4,9 @@ import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx } from "./_generated/server";
 import { mutation } from "./_generated/server";
 import { requireRole } from "./authorization";
+import { releasePublicationStatus } from "./releasePolicy";
 
 const workspaceFile = v.object({ path: v.string(), content: v.string() });
-
-function releaseIsPublished(release: Doc<"assignmentReleases">, now = Date.now()) {
-  if ("publicationState" in release) {
-    if (release.publicationState === "published") return true;
-    return (
-      release.publicationState === "scheduled" &&
-      "scheduledFor" in release &&
-      typeof release.scheduledFor === "number" &&
-      release.scheduledFor <= now
-    );
-  }
-  return release.publishedAt <= now;
-}
 
 async function requireStudentRelease(
   ctx: MutationCtx,
@@ -26,7 +14,11 @@ async function requireStudentRelease(
 ) {
   const { organization, user } = await requireRole(ctx, "student");
   const release = await ctx.db.get(assignmentReleaseId);
-  if (!release || release.organizationId !== organization._id || !releaseIsPublished(release)) {
+  if (
+    !release ||
+    release.organizationId !== organization._id ||
+    releasePublicationStatus(release) !== "published"
+  ) {
     throw new ConvexError("Forbidden");
   }
   const enrollment = await ctx.db

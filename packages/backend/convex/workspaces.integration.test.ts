@@ -73,6 +73,32 @@ async function seed(backend: ReturnType<typeof createTestBackend>) {
 }
 
 describe("Student Workspaces", () => {
+  it("uses derived publication visibility when opening a Workspace", async () => {
+    const backend = createTestBackend();
+    const { assignmentReleaseId } = await seed(backend);
+    const student = backend.withIdentity({ subject: "auth-student" });
+
+    await backend.run(async (ctx) => {
+      await ctx.db.patch(assignmentReleaseId, {
+        publicationState: "draft",
+        publishedAt: undefined,
+      });
+    });
+    await expect(student.mutation(api.workspaces.open, { assignmentReleaseId })).rejects.toThrow(
+      "Forbidden",
+    );
+
+    await backend.run(async (ctx) => {
+      await ctx.db.patch(assignmentReleaseId, {
+        publicationState: "scheduled",
+        scheduledFor: Date.now() - 1,
+      });
+    });
+    await expect(
+      student.mutation(api.workspaces.open, { assignmentReleaseId }),
+    ).resolves.toMatchObject({ assignmentReleaseId });
+  });
+
   it("initializes one multi-file Workspace from the exact released starter files", async () => {
     const backend = createTestBackend();
     const { assignmentReleaseId } = await seed(backend);
