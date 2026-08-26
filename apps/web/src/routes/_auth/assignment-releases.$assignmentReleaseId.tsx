@@ -10,6 +10,7 @@ import WorkspaceEditor, {
 import { WorkspaceViewers } from "@/components/live-workspace-viewer";
 import type { StarterFileDecision, StarterFileMerge, WorkspaceFile } from "@/lib/workspace-state";
 import type { WorkHistoryChunk } from "@/lib/work-history";
+import { languageLabel, type WorkspaceLanguage } from "@/lib/language-intelligence";
 
 export const Route = createFileRoute("/_auth/assignment-releases/$assignmentReleaseId")({
   component: AssignmentWorkspaceRoute,
@@ -20,6 +21,7 @@ type Release = {
   assignmentTitle: string;
   classroomName: string;
   instructions: string;
+  language: WorkspaceLanguage;
   runtimeVersion: string;
   entrypoint: string;
   version: number;
@@ -34,6 +36,7 @@ type Release = {
 type Workspace = {
   _id: string;
   files: WorkspaceFile[];
+  language: WorkspaceLanguage;
   runtimeVersion: string;
   entrypoint: string;
   version: number;
@@ -136,7 +139,8 @@ function AssignmentWorkspaceRoute() {
             </h1>
           </div>
           <p className="text-sm text-muted-foreground">
-            Python {workspace.runtimeVersion} · Workspace Version {workspace.version}
+            {languageLabel(workspace.language)} {workspace.runtimeVersion} · Workspace Version{" "}
+            {workspace.version}
             {workspace.versionMerge ? ` · Release Version ${release.version}` : ""} · Editing
             available
           </p>
@@ -169,6 +173,7 @@ function AssignmentWorkspaceRoute() {
           assignmentReleaseId={assignmentReleaseId}
           workspaceId={workspace._id}
           files={workspace.files}
+          language={workspace.language}
           entrypoint={workspace.entrypoint}
           runtimeVersion={workspace.runtimeVersion}
           versionMerge={workspace.versionMerge}

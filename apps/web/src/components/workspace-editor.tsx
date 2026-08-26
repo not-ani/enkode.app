@@ -22,10 +22,15 @@ import {
 
 import { WebSocketLanguageServiceTransport } from "@/lib/language-service-websocket";
 import {
+  BrowserLocalLanguageService,
+  registerEnkodeMonacoLanguageAdapter,
+  type WorkspaceLanguage,
+  type WorkspaceLanguageService,
+} from "@/lib/language-intelligence";
+import {
   type LanguageIntelligenceState,
   RemotePythonLanguageService,
 } from "@/lib/python-language-service";
-import { registerPythonMonacoAdapter } from "@/lib/python-monaco-adapter";
 import {
   createLocalWorkspaceDraftStore,
   createWorkspaceState,
@@ -44,6 +49,7 @@ type WorkspaceEditorProps = {
   assignmentReleaseId: string;
   workspaceId: string;
   files: WorkspaceFile[];
+  language: WorkspaceLanguage;
   entrypoint: string;
   runtimeVersion: string;
   onSave: (files: WorkspaceFile[]) => Promise<void>;
@@ -112,6 +118,7 @@ export default function WorkspaceEditor({
   assignmentReleaseId,
   workspaceId,
   files,
+  language,
   entrypoint,
   runtimeVersion,
   onSave,
@@ -144,13 +151,15 @@ export default function WorkspaceEditor({
   const [submitState, setSubmitState] = useState<"idle" | "submitting">("idle");
   const [submissionResult, setSubmissionResult] = useState<SubmissionResult>();
   const [mergeState, setMergeState] = useState<"idle" | "applying">("idle");
-  const languageService = useMemo(
+  const languageService = useMemo<WorkspaceLanguageService>(
     () =>
-      new RemotePythonLanguageService(
-        env.VITE_PYRIGHT_LANGUAGE_SERVICE_URL,
-        new WebSocketLanguageServiceTransport(),
-      ),
-    [],
+      language === "python"
+        ? (new RemotePythonLanguageService(
+            env.VITE_PYRIGHT_LANGUAGE_SERVICE_URL,
+            new WebSocketLanguageServiceTransport(),
+          ) as unknown as WorkspaceLanguageService)
+        : new BrowserLocalLanguageService(language),
+    [language],
   );
   const [intelligenceState, setIntelligenceState] = useState<LanguageIntelligenceState>(() =>
     languageService.getState(),
@@ -172,20 +181,24 @@ export default function WorkspaceEditor({
   useEffect(() => {
     void languageService.connect({
       workspaceId,
-      runtime: { language: "python", version: runtimeVersion },
+      runtime: { language, version: runtimeVersion },
       files: initialFiles.current,
     });
     return () => languageService.disconnect();
-  }, [languageService, runtimeVersion, workspaceId]);
+  }, [language, languageService, runtimeVersion, workspaceId]);
 
   useEffect(() => () => monacoAdapter.current?.dispose(), []);
 
   const prepareMonaco = useCallback(
     (monaco: typeof Monaco) => {
       monacoAdapter.current?.dispose();
-      monacoAdapter.current = registerPythonMonacoAdapter(monaco, languageService, workspaceId);
+      monacoAdapter.current = registerEnkodeMonacoLanguageAdapter(monaco, {
+        language,
+        service: languageService,
+        workspaceId,
+      });
     },
-    [languageService, workspaceId],
+    [language, languageService, workspaceId],
   );
 
   useEffect(() => {
@@ -491,7 +504,7 @@ export default function WorkspaceEditor({
             >
               <MonacoEditor
                 height="100%"
-                language="python"
+                language={language}
                 path={`enkode://${workspaceId}/${activeFile.path}`}
                 value={activeFile.content}
                 beforeMount={prepareMonaco}

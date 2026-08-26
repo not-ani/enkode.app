@@ -11,8 +11,13 @@ type VersionOption = {
   assignmentTitle: string;
   assignmentVersionId: string;
   version: number;
+  language: "python" | "javascript" | "typescript";
   runtimeVersion: string;
 };
+
+function languageName(language: VersionOption["language"]) {
+  return { python: "Python", javascript: "JavaScript", typescript: "TypeScript" }[language];
+}
 type Release = {
   _id: string;
   assignmentId: string;
@@ -181,8 +186,8 @@ export default function AssignmentReleases({ classrooms }: { classrooms: Classro
                   <option value="">Select a version</option>
                   {available?.map((version) => (
                     <option value={version.assignmentVersionId} key={version.assignmentVersionId}>
-                      {version.assignmentTitle} · Version {version.version} · Python{" "}
-                      {version.runtimeVersion}
+                      {version.assignmentTitle} · Version {version.version} ·{" "}
+                      {languageName(version.language)} {version.runtimeVersion}
                     </option>
                   ))}
                 </select>
@@ -384,6 +389,7 @@ export default function AssignmentReleases({ classrooms }: { classrooms: Classro
 
 type VersionPreview = {
   version: number;
+  language: VersionOption["language"];
   instructions: string;
   runtimeVersion: string;
   entrypoint: string;
@@ -444,7 +450,8 @@ function VersionAdoption({ release, versions }: { release: Release; versions: Ve
             <option value="">Choose a version to preview</option>
             {newer.map((version) => (
               <option value={version.assignmentVersionId} key={version.assignmentVersionId}>
-                Version {version.version} · Python {version.runtimeVersion}
+                Version {version.version} · {languageName(version.language)}{" "}
+                {version.runtimeVersion}
               </option>
             ))}
           </select>
@@ -465,7 +472,9 @@ function VersionAdoption({ release, versions }: { release: Release; versions: Ve
                   : "changed"}
               </li>
               <li>
-                Runtime: {preview.fromVersion.runtimeVersion} → {preview.toVersion.runtimeVersion}
+                Runtime: {languageName(preview.fromVersion.language)}{" "}
+                {preview.fromVersion.runtimeVersion} → {languageName(preview.toVersion.language)}{" "}
+                {preview.toVersion.runtimeVersion}
               </li>
               <li>
                 Entrypoint: {preview.fromVersion.entrypoint} → {preview.toVersion.entrypoint}
@@ -540,6 +549,7 @@ function VersionAdoption({ release, versions }: { release: Release; versions: Ve
 
 type StudentRelease = Release & {
   classroomName: string;
+  language: VersionOption["language"];
   runtimeVersion: string;
   effectiveDeadline: { deadlineAt?: number };
   submissionEligibility: { canSubmit: boolean; reason?: string; remainingAttempts?: number };

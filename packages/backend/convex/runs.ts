@@ -80,6 +80,7 @@ export const prepare = internalQuery({
       studentId: user._id,
       assignmentReleaseId: release._id,
       assignmentVersionId: version._id,
+      language: version.language,
       runtimeVersion: version.runtimeVersion,
       entrypoint: version.entrypoint,
       files,
@@ -117,7 +118,7 @@ export const run = action({
   handler: async (ctx, input) => {
     const prepared = await ctx.runQuery(internal.runs.prepare, input);
     const result = await evaluateRun(executionServiceFromEnvironment(), prepared);
-    const { publicTests: _publicTests, ...record } = prepared;
+    const { language: _language, publicTests: _publicTests, ...record } = prepared;
     const runId = await ctx.runMutation(internal.runs.record, {
       workspaceId: input.workspaceId,
       ...record,

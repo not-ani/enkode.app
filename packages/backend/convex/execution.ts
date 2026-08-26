@@ -1,7 +1,9 @@
 export type ExecutionFile = { path: string; content: string };
 
+import type { AssignmentLanguage } from "./runtimeCatalog";
+
 export type ExecutionRequest = {
-  runtime: { language: "python"; version: string };
+  runtime: { language: AssignmentLanguage; version: string };
   entrypoint: string;
   files: ExecutionFile[];
   stdin?: string;

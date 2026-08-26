@@ -74,6 +74,7 @@ async function workspaceDetails(ctx: MutationCtx, workspace: Doc<"workspaces">) 
   return {
     ...workspace,
     version: version.version,
+    language: version.language,
     runtimeVersion: version.runtimeVersion,
     entrypoint: version.entrypoint,
     versionMerge,

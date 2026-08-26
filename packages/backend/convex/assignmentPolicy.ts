@@ -2,7 +2,7 @@ import { ConvexError } from "convex/values";
 
 type EvaluationTest = {
   name: string;
-  kind: "input_output" | "python_harness";
+  kind: "input_output" | "python_harness" | "javascript_harness" | "typescript_harness";
   visibility: "public" | "hidden";
   weight: number;
   stdin?: string;
@@ -25,7 +25,10 @@ export function validateFilePath(path: string) {
   return cleaned;
 }
 
-export function validateEvaluationTest(test: EvaluationTest) {
+export function validateEvaluationTest(
+  test: EvaluationTest,
+  language: "python" | "javascript" | "typescript",
+) {
   if (!test.name.trim()) throw new ConvexError("Evaluation Test name is required");
   if (!Number.isFinite(test.weight) || test.weight < 0) {
     throw new ConvexError("Evaluation Test weight must be zero or greater");
@@ -38,12 +41,14 @@ export function validateEvaluationTest(test: EvaluationTest) {
     ) {
       throw new ConvexError("Input/output tests require input and expected output only");
     }
-  } else if (
-    !test.harness?.trim() ||
-    test.stdin !== undefined ||
-    test.expectedOutput !== undefined
-  ) {
-    throw new ConvexError("Python harness tests require harness source only");
+  } else {
+    const expectedKind = `${language}_harness`;
+    if (test.kind !== expectedKind) {
+      throw new ConvexError(`${language} Assignment Versions require ${expectedKind} tests`);
+    }
+    if (!test.harness?.trim() || test.stdin !== undefined || test.expectedOutput !== undefined) {
+      throw new ConvexError("Language harness tests require harness source only");
+    }
   }
 }
 

@@ -49,8 +49,9 @@ vi.mock("@/lib/python-language-service", () => ({
   },
 }));
 
-vi.mock("@/lib/python-monaco-adapter", () => ({
-  registerPythonMonacoAdapter: mocks.prepareLanguageAdapter,
+vi.mock("@/lib/language-intelligence", () => ({
+  BrowserLocalLanguageService: class {},
+  registerEnkodeMonacoLanguageAdapter: mocks.prepareLanguageAdapter,
 }));
 
 vi.mock("@/lib/work-history", () => ({
@@ -101,6 +102,7 @@ describe("Workspace editor integration", () => {
         assignmentReleaseId="release-1"
         workspaceId="workspace-1"
         files={[{ path: "main.py", content: "print('before')\n" }]}
+        language="python"
         entrypoint="main.py"
         runtimeVersion="3.12.0"
         onSave={vi.fn(async () => undefined)}
@@ -183,6 +185,7 @@ describe("Workspace editor integration", () => {
         assignmentReleaseId="release-1"
         workspaceId="workspace-1"
         files={[{ path: "main.py", content: "print('student')\n" }]}
+        language="python"
         entrypoint="main.py"
         runtimeVersion="3.12.0"
         onSave={vi.fn(async () => undefined)}

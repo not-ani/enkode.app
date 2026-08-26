@@ -1,5 +1,6 @@
 import type { Doc } from "./_generated/dataModel";
 import type { ExecutionFile, ExecutionResult, ExecutionService } from "./execution";
+import type { AssignmentLanguage } from "./runtimeCatalog";
 
 type EvaluationTest = Doc<"evaluationTests">;
 
@@ -15,6 +16,7 @@ export type PublicTestResult = {
 export async function evaluateRun(
   execution: ExecutionService,
   input: {
+    language?: AssignmentLanguage;
     runtimeVersion: string;
     entrypoint: string;
     files: ExecutionFile[];
@@ -22,7 +24,7 @@ export async function evaluateRun(
   },
 ) {
   const executionResult = await execution.execute({
-    runtime: { language: "python", version: input.runtimeVersion },
+    runtime: { language: input.language ?? "python", version: input.runtimeVersion },
     entrypoint: input.entrypoint,
     files: input.files,
   });
@@ -44,12 +46,17 @@ export async function evaluateRun(
 /** Shared platform-owned test runner used by public Run and full Submission evaluation. */
 export async function evaluateTest(
   execution: ExecutionService,
-  input: { runtimeVersion: string; entrypoint: string; files: ExecutionFile[] },
+  input: {
+    language?: AssignmentLanguage;
+    runtimeVersion: string;
+    entrypoint: string;
+    files: ExecutionFile[];
+  },
   test: EvaluationTest,
 ) {
   const request = (entrypoint: string, files: ExecutionFile[], stdin?: string) =>
     execution.execute({
-      runtime: { language: "python", version: input.runtimeVersion },
+      runtime: { language: input.language ?? "python", version: input.runtimeVersion },
       entrypoint,
       files,
       stdin,
@@ -60,7 +67,10 @@ export async function evaluateTest(
     result = await request(input.entrypoint, input.files, test.stdin);
     passed = result.status === "completed" && result.stdout === test.expectedOutput;
   } else {
-    let harnessPath = `__enkode_${test.visibility}_test_${test.order}.py`;
+    const extension = { python: "py", javascript: "js", typescript: "ts" }[
+      input.language ?? "python"
+    ];
+    let harnessPath = `__enkode_${test.visibility}_test_${test.order}.${extension}`;
     while (input.files.some(({ path }) => path === harnessPath)) harnessPath = `_${harnessPath}`;
     result = await request(harnessPath, [
       { path: harnessPath, content: test.harness! },

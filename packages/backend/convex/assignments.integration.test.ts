@@ -3,7 +3,13 @@ import { describe, expect, it } from "vitest";
 
 import { api } from "./_generated/api";
 import { studentVisibleEvaluationTest } from "./assignmentPolicy";
-import { maintainedPythonRuntime, runtimeCanBeRemoved } from "./runtimeCatalog";
+import {
+  maintainedJavaScriptRuntime,
+  maintainedPythonRuntime,
+  maintainedRuntimes,
+  maintainedTypeScriptRuntime,
+  runtimeCanBeRemoved,
+} from "./runtimeCatalog";
 import schema from "./schema";
 
 const modules = import.meta.glob("./**/*.ts");
@@ -238,5 +244,104 @@ describe("immutable Python Assignment Versions", () => {
     expect(await backend.run((ctx) => runtimeCanBeRemoved(ctx, maintainedPythonRuntime))).toBe(
       false,
     );
+  });
+});
+
+describe.each([
+  {
+    runtime: maintainedJavaScriptRuntime,
+    entrypoint: "main.js",
+    kind: "javascript_harness" as const,
+  },
+  {
+    runtime: maintainedTypeScriptRuntime,
+    entrypoint: "main.ts",
+    kind: "typescript_harness" as const,
+  },
+])("immutable $runtime.language Assignment Versions", ({ runtime, entrypoint, kind }) => {
+  it("authors pinned starter files and supported tests and retains the referenced runtime", async () => {
+    const backend = createTestBackend();
+    const { courseId } = await seedCourse(backend);
+    const collaborator = backend.withIdentity({ subject: "auth-collaborator" });
+    await expect(
+      collaborator.query(api.assignments.supportedRuntimes, { courseId }),
+    ).resolves.toEqual(maintainedRuntimes);
+    expect(await backend.run((ctx) => runtimeCanBeRemoved(ctx, runtime))).toBe(true);
+
+    const created = await collaborator.mutation(api.assignments.create, {
+      courseId,
+      title: `${runtime.language} assignment`,
+      language: runtime.language,
+      runtimeVersion: runtime.version,
+      instructions: "Export the answer.",
+      entrypoint,
+      starterFiles: [{ path: entrypoint, content: "export const answer = 42;\n" }],
+      evaluationTests: [
+        {
+          name: "exports answer",
+          kind,
+          visibility: "hidden",
+          weight: 2,
+          harness: "if (42 !== 42) throw new Error('unreachable');\n",
+          failGuidance: "Export the expected value.",
+        },
+      ],
+    });
+    const version = await collaborator.query(api.assignments.getVersion, {
+      assignmentVersionId: created.assignmentVersionId,
+    });
+
+    expect(version).toMatchObject({
+      language: runtime.language,
+      runtimeVersion: runtime.version,
+      entrypoint,
+      starterFiles: [expect.objectContaining({ path: entrypoint })],
+      evaluationTests: [expect.objectContaining({ kind, visibility: "hidden" })],
+    });
+    expect(await backend.run((ctx) => runtimeCanBeRemoved(ctx, runtime))).toBe(false);
+  });
+
+  it("rejects mismatched runtimes, entrypoints, and native harnesses", async () => {
+    const backend = createTestBackend();
+    const { courseId } = await seedCourse(backend);
+    const collaborator = backend.withIdentity({ subject: "auth-collaborator" });
+    const base = {
+      courseId,
+      title: "Invalid",
+      language: runtime.language,
+      runtimeVersion: runtime.version,
+      instructions: "Invalid",
+      entrypoint,
+      starterFiles: [{ path: entrypoint, content: "" }],
+      evaluationTests: [
+        {
+          name: "native",
+          kind,
+          visibility: "public" as const,
+          weight: 1,
+          harness: "throw new Error('test');",
+        },
+      ],
+    };
+
+    await expect(
+      collaborator.mutation(api.assignments.create, {
+        ...base,
+        runtimeVersion: maintainedPythonRuntime.version,
+      }),
+    ).rejects.toThrow("exactly pinned maintained");
+    await expect(
+      collaborator.mutation(api.assignments.create, {
+        ...base,
+        entrypoint: "main.py",
+        starterFiles: [{ path: "main.py", content: "" }],
+      }),
+    ).rejects.toThrow("entrypoint must end");
+    await expect(
+      collaborator.mutation(api.assignments.create, {
+        ...base,
+        evaluationTests: [{ ...base.evaluationTests[0]!, kind: "python_harness" }],
+      }),
+    ).rejects.toThrow("require");
   });
 });

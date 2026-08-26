@@ -2,7 +2,17 @@ import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
 
 const role = v.union(v.literal("teacher"), v.literal("student"));
-const testKind = v.union(v.literal("input_output"), v.literal("python_harness"));
+const assignmentLanguage = v.union(
+  v.literal("python"),
+  v.literal("javascript"),
+  v.literal("typescript"),
+);
+const testKind = v.union(
+  v.literal("input_output"),
+  v.literal("python_harness"),
+  v.literal("javascript_harness"),
+  v.literal("typescript_harness"),
+);
 const testVisibility = v.union(v.literal("public"), v.literal("hidden"));
 const releasePublicationState = v.union(
   v.literal("draft"),
@@ -87,7 +97,7 @@ export default defineSchema({
     assignmentId: v.id("assignments"),
     version: v.number(),
     instructions: v.string(),
-    language: v.literal("python"),
+    language: assignmentLanguage,
     runtimeVersion: v.string(),
     entrypoint: v.string(),
     createdBy: v.id("users"),

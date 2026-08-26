@@ -157,6 +157,7 @@ export const prepare = internalQuery({
       studentId: user._id,
       assignmentReleaseId: release._id,
       assignmentVersionId: version._id,
+      language: version.language,
       runtimeVersion: version.runtimeVersion,
       entrypoint: version.entrypoint,
       files: input.files,

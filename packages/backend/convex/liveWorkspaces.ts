@@ -146,6 +146,7 @@ export const watch = query({
       studentDisplayName: student.displayName,
       studentUsername: student.username,
       entrypoint: version.entrypoint,
+      language: version.language,
       runtimeVersion: version.runtimeVersion,
     };
   },

@@ -3,6 +3,7 @@ import { useMutation, useQuery } from "convex/react";
 import { lazy, Suspense, useEffect, useState } from "react";
 
 import type { WorkspaceFile } from "@/lib/workspace-state";
+import { languageLabel, type WorkspaceLanguage } from "@/lib/language-intelligence";
 
 const MonacoEditor = lazy(() => import("./workspace-monaco"));
 const HEARTBEAT_INTERVAL_MS = 20_000;
@@ -15,6 +16,7 @@ type LiveWorkspace = {
   studentDisplayName: string;
   studentUsername: string;
   entrypoint: string;
+  language: WorkspaceLanguage;
   runtimeVersion: string;
 };
 
@@ -82,8 +84,8 @@ export default function LiveWorkspaceViewer({ workspaceId }: { workspaceId: stri
         <p className="text-sm text-muted-foreground">{workspace.classroomName}</p>
         <h1 className="text-2xl font-semibold tracking-tight">{workspace.assignmentTitle}</h1>
         <p className="text-sm text-muted-foreground">
-          Viewing {workspace.studentDisplayName} (@{workspace.studentUsername}) · Python{" "}
-          {workspace.runtimeVersion}
+          Viewing {workspace.studentDisplayName} (@{workspace.studentUsername}) ·{" "}
+          {languageLabel(workspace.language)} {workspace.runtimeVersion}
         </p>
       </header>
       <p className="border-y border-foreground/10 py-3 text-sm text-muted-foreground">
@@ -127,7 +129,7 @@ export default function LiveWorkspaceViewer({ workspaceId }: { workspaceId: stri
             >
               <MonacoEditor
                 height="100%"
-                language="python"
+                language={workspace.language}
                 path={`enkode-live://${workspaceId}/${selectedPath}`}
                 value={selectedFile?.content ?? ""}
                 options={{

@@ -92,6 +92,7 @@ export async function mergePlan(
     fromVersion: {
       assignmentVersionId: fromVersion._id,
       version: fromVersion.version,
+      language: fromVersion.language,
       instructions: fromVersion.instructions,
       runtimeVersion: fromVersion.runtimeVersion,
       entrypoint: fromVersion.entrypoint,
@@ -100,6 +101,7 @@ export async function mergePlan(
     toVersion: {
       assignmentVersionId: toVersion._id,
       version: toVersion.version,
+      language: toVersion.language,
       instructions: toVersion.instructions,
       runtimeVersion: toVersion.runtimeVersion,
       entrypoint: toVersion.entrypoint,
