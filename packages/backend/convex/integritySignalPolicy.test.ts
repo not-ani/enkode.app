@@ -52,6 +52,32 @@ describe("Integrity Signal policy", () => {
     ).toEqual([expect.objectContaining({ type: "unattributed_bulk_change", eventSequence: 2 })]);
   });
 
+  it("ignores Run and Submission replay events", () => {
+    expect(
+      eventSignalCandidates("workspace", baseline, [
+        {
+          sequence: 1,
+          type: "run",
+          runId: "run-1",
+          status: "completed",
+          stdout: "ok",
+          stderr: "",
+          exitCode: 0,
+          publicTests: [],
+          observedAt: 1,
+        },
+        {
+          sequence: 2,
+          type: "submission",
+          submissionId: "submission-1",
+          attemptNumber: 1,
+          proposedPoints: 10,
+          observedAt: 2,
+        },
+      ]),
+    ).toEqual([]);
+  });
+
   it("allows one neutral terminal review transition", () => {
     expect(transitionIntegritySignal("open", "reviewed")).toBe("reviewed");
     expect(transitionIntegritySignal("open", "dismissed")).toBe("dismissed");

@@ -45,6 +45,7 @@ export function eventSignalCandidates(
       for (const file of event.files) files.set(file.path, file.content);
       continue;
     }
+    if (event.type !== "file_change") continue;
     const previous = files.get(event.path);
     if (previous === undefined)
       throw new Error(`Work History references unknown file ${event.path}`);
