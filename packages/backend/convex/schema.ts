@@ -9,6 +9,7 @@ const releasePublicationState = v.union(
   v.literal("scheduled"),
   v.literal("published"),
 );
+const materialKind = v.union(v.literal("rich_text"), v.literal("file"), v.literal("external_link"));
 
 export default defineSchema({
   organizations: defineTable({
@@ -89,6 +90,42 @@ export default defineSchema({
     order: v.number(),
   }).index("by_version", ["assignmentVersionId", "order"]),
 
+  materials: defineTable({
+    organizationId: v.id("organizations"),
+    courseId: v.id("courses"),
+    title: v.string(),
+    latestVersion: v.number(),
+  })
+    .index("by_course", ["courseId"])
+    .index("by_organization", ["organizationId"]),
+
+  materialAttachments: defineTable({
+    organizationId: v.id("organizations"),
+    storageProvider: v.string(),
+    storageBucket: v.string(),
+    storageKey: v.string(),
+    filename: v.string(),
+    contentType: v.string(),
+    byteSize: v.number(),
+    sha256: v.string(),
+    createdBy: v.id("users"),
+    createdAt: v.number(),
+  })
+    .index("by_organization_storage_key", ["organizationId", "storageKey"])
+    .index("by_storage_location", ["storageProvider", "storageBucket", "storageKey"]),
+
+  materialVersions: defineTable({
+    organizationId: v.id("organizations"),
+    materialId: v.id("materials"),
+    version: v.number(),
+    kind: materialKind,
+    richText: v.optional(v.string()),
+    externalUrl: v.optional(v.string()),
+    attachmentId: v.optional(v.id("materialAttachments")),
+    createdBy: v.id("users"),
+    createdAt: v.number(),
+  }).index("by_material", ["materialId", "version"]),
+
   classrooms: defineTable({
     organizationId: v.id("organizations"),
     courseId: v.id("courses"),
@@ -134,6 +171,22 @@ export default defineSchema({
   })
     .index("by_classroom", ["classroomId", "order"])
     .index("by_classroom_assignment", ["classroomId", "assignmentId"]),
+
+  materialReleases: defineTable({
+    organizationId: v.id("organizations"),
+    classroomId: v.id("classrooms"),
+    materialId: v.id("materials"),
+    materialVersionId: v.id("materialVersions"),
+    order: v.number(),
+    publicationState: releasePublicationState,
+    scheduledFor: v.optional(v.number()),
+    scheduledBy: v.optional(v.id("users")),
+    publishedAt: v.optional(v.number()),
+    createdBy: v.id("users"),
+    createdAt: v.number(),
+  })
+    .index("by_classroom", ["classroomId", "order"])
+    .index("by_classroom_material", ["classroomId", "materialId"]),
 
   workspaces: defineTable({
     organizationId: v.id("organizations"),

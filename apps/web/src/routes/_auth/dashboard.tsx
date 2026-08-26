@@ -9,6 +9,8 @@ import { useState, type FormEvent } from "react";
 import ClassroomEnrollments from "@/components/classroom-enrollments";
 import AssignmentAuthoring from "@/components/assignment-authoring";
 import AssignmentReleases, { StudentAssignmentReleases } from "@/components/assignment-releases";
+import MaterialAuthoring from "@/components/material-authoring";
+import MaterialReleases, { StudentMaterials } from "@/components/material-releases";
 import StudentManagement from "@/components/student-management";
 
 export const Route = createFileRoute("/_auth/dashboard")({ component: DashboardContent });
@@ -225,6 +227,7 @@ function DashboardContent() {
         </div>
         <ClassroomEnrollments classrooms={classrooms} />
         <AssignmentReleases classrooms={classrooms} />
+        <MaterialReleases classrooms={classrooms} />
         <StudentManagement />
       </div>
     </main>
@@ -259,6 +262,7 @@ function StudentDashboard({ displayName }: { displayName: string }) {
         )}
       </section>
       <StudentAssignmentReleases />
+      <StudentMaterials />
     </main>
   );
 }
@@ -299,7 +303,12 @@ function TeachingList(
                   kind={isCourse ? "course" : "classroom"}
                   assignments={assignments}
                 />
-                {isCourse ? <AssignmentAuthoring courseId={item._id} /> : null}
+                {isCourse ? (
+                  <>
+                    <AssignmentAuthoring courseId={item._id} />
+                    <MaterialAuthoring courseId={item._id} />
+                  </>
+                ) : null}
               </li>
             );
           })}
