@@ -25,6 +25,7 @@ type InlineFeedback = {
 type Attempt = {
   _id: string;
   attemptNumber: number;
+  assignmentVersion: number;
   proposedPoints: number;
   submittedAt: number;
   snapshotFiles: { path: string; contentHash: string; byteLength: number }[];
@@ -223,7 +224,8 @@ function GradeForm({ review, row }: { review: Review; row: QueueRow }) {
         >
           {review.attempts.map((attempt) => (
             <option value={attempt._id} key={attempt._id}>
-              Attempt {attempt.attemptNumber} · {attempt.proposedPoints} proposed points
+              Attempt {attempt.attemptNumber} · Version {attempt.assignmentVersion} ·{" "}
+              {attempt.proposedPoints} proposed points
             </option>
           ))}
         </select>

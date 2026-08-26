@@ -350,4 +350,44 @@ describe("grading and explicit return", () => {
     expect(grades).toHaveLength(1);
     expect(grades[0]?.submissionId).toBe(second);
   });
+
+  it("keeps grading bound to an old-version Submission after the release advances", async () => {
+    const backend = convexTest(schema, modules);
+    const seeded = await seed(backend);
+    const submissionId = await addSubmission(backend, seeded, 1, 6);
+    await backend.run(async (ctx) => {
+      const current = (await ctx.db.get(seeded.assignmentVersionId))!;
+      const newerVersionId = await ctx.db.insert("assignmentVersions", {
+        organizationId: current.organizationId,
+        assignmentId: current.assignmentId,
+        version: 2,
+        instructions: "Updated instructions",
+        language: current.language,
+        runtimeVersion: current.runtimeVersion,
+        entrypoint: current.entrypoint,
+        createdBy: current.createdBy,
+        createdAt: 2,
+      });
+      await ctx.db.patch(seeded.assignmentReleaseId, { assignmentVersionId: newerVersionId });
+    });
+
+    const teacher = backend.withIdentity({ subject: "teacher" });
+    const review = await teacher.query(api.grades.review, {
+      assignmentReleaseId: seeded.assignmentReleaseId,
+      studentId: seeded.studentId,
+    });
+    expect(review.attempts[0]).toMatchObject({
+      _id: submissionId,
+      assignmentVersionId: seeded.assignmentVersionId,
+      assignmentVersion: 1,
+      snapshotFiles: [{ path: "main.py", contentHash: "1".repeat(64) }],
+    });
+    await expect(
+      teacher.mutation(api.grades.saveDraft, {
+        submissionId,
+        points: 6,
+        inlineFeedback: [feedback],
+      }),
+    ).resolves.toBeDefined();
+  });
 });

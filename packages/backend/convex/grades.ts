@@ -18,6 +18,19 @@ const inlineFeedbackInput = v.object({
 
 type DatabaseCtx = QueryCtx | MutationCtx;
 
+async function requireSubmissionSnapshot(ctx: DatabaseCtx, submission: Doc<"submissions">) {
+  const snapshot = await ctx.db.get(submission.snapshotId);
+  if (
+    !snapshot ||
+    snapshot.organizationId !== submission.organizationId ||
+    snapshot.workspaceId !== submission.workspaceId ||
+    snapshot.assignmentVersionId !== submission.assignmentVersionId
+  ) {
+    throw new ConvexError("Submission snapshot is unavailable");
+  }
+  return snapshot;
+}
+
 async function requireTeacherSubmission(ctx: DatabaseCtx, submissionId: Id<"submissions">) {
   const submission = await ctx.db.get(submissionId);
   if (!submission) throw new ConvexError("Submission not found");
@@ -27,8 +40,7 @@ async function requireTeacherSubmission(ctx: DatabaseCtx, submissionId: Id<"subm
   if (submission.organizationId !== authenticated.organization._id) {
     throw new ConvexError("Forbidden");
   }
-  const snapshot = await ctx.db.get(submission.snapshotId);
-  if (!snapshot) throw new ConvexError("Submission snapshot is unavailable");
+  const snapshot = await requireSubmissionSnapshot(ctx, submission);
   return { ...authenticated, release, snapshot, submission };
 }
 
@@ -132,10 +144,20 @@ export const review = query({
     const attempts = await Promise.all(
       submissions
         .sort((left, right) => right.attemptNumber - left.attemptNumber)
-        .map(async (submission) => ({
-          ...submission,
-          snapshotFiles: (await ctx.db.get(submission.snapshotId))?.files ?? [],
-        })),
+        .map(async (submission) => {
+          const [snapshot, version] = await Promise.all([
+            requireSubmissionSnapshot(ctx, submission),
+            ctx.db.get(submission.assignmentVersionId),
+          ]);
+          if (!version || version.organizationId !== submission.organizationId) {
+            throw new ConvexError("Submission Assignment Version is unavailable");
+          }
+          return {
+            ...submission,
+            assignmentVersion: version.version,
+            snapshotFiles: snapshot.files,
+          };
+        }),
     );
     const grade = await ctx.db
       .query("grades")
