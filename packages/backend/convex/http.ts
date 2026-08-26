@@ -2,6 +2,7 @@ import { httpRouter } from "convex/server";
 import { z } from "zod";
 
 import { internal } from "./_generated/api";
+import type { Id } from "./_generated/dataModel";
 import { httpAction } from "./_generated/server";
 import { authComponent, createAuth, createProvisioningAuth } from "./auth";
 import { exportOrganizationHttp } from "./organizationExport";
@@ -91,6 +92,37 @@ const provisionOrganization = httpAction(async (ctx, request) => {
   }
 });
 
+const inspectAuditEvents = httpAction(async (ctx, request) => {
+  const secret = process.env.DEVELOPER_PROVISIONING_SECRET;
+  const authorization = request.headers.get("authorization");
+  if (!secret || authorization !== `Bearer ${secret}`) {
+    return json({ error: "Not found" }, 404);
+  }
+
+  const url = new URL(request.url);
+  const parsed = z
+    .object({
+      organizationId: z.string().min(1),
+      limit: z.coerce.number().int().positive().max(200).optional(),
+    })
+    .safeParse({
+      organizationId: url.searchParams.get("organizationId"),
+      limit: url.searchParams.get("limit") ?? undefined,
+    });
+  if (!parsed.success) return json({ error: "Invalid Audit Event request" }, 400);
+
+  try {
+    const events = await ctx.runQuery(internal.audit.listOrganization, {
+      organizationId: parsed.data.organizationId as Id<"organizations">,
+      limit: parsed.data.limit,
+    });
+    return json({ events }, 200);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Audit Events are unavailable";
+    return json({ error: message }, 404);
+  }
+});
+
 http.route({
   path: "/api/developer/provision-organization",
   method: "POST",
@@ -101,6 +133,12 @@ http.route({
   path: "/api/developer/export-organization",
   method: "POST",
   handler: exportOrganizationHttp,
+});
+
+http.route({
+  path: "/api/developer/audit-events",
+  method: "GET",
+  handler: inspectAuditEvents,
 });
 
 export default http;

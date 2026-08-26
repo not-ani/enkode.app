@@ -75,6 +75,7 @@ describe("provisioned identity boundary", () => {
     expect(events.map((event) => event.action)).toEqual([
       "organization.provisioned",
       "user.provisioned",
+      "user.teacher_role_assigned",
     ]);
   });
 

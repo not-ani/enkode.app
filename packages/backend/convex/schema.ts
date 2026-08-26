@@ -555,6 +555,8 @@ export default defineSchema({
 
   auditEvents: defineTable({
     organizationId: v.id("organizations"),
+    courseId: v.optional(v.id("courses")),
+    classroomId: v.optional(v.id("classrooms")),
     actorKind: v.union(v.literal("developer"), v.literal("user")),
     actorUserId: v.optional(v.id("users")),
     action: v.string(),
@@ -563,5 +565,7 @@ export default defineSchema({
     occurredAt: v.number(),
   })
     .index("by_organization", ["organizationId", "occurredAt"])
+    .index("by_organization_course", ["organizationId", "courseId", "occurredAt"])
+    .index("by_organization_classroom", ["organizationId", "classroomId", "occurredAt"])
     .index("by_target", ["targetKind", "targetId", "occurredAt"]),
 });

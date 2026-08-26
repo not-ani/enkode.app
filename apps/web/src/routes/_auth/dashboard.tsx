@@ -17,6 +17,7 @@ import Gradebook from "@/components/gradebook";
 import StudentManagement from "@/components/student-management";
 import WorkHistoryList from "@/components/work-history-list";
 import ArchiveActions from "@/components/archive-actions";
+import AuditEventExplorer from "@/components/audit-event-explorer";
 
 export const Route = createFileRoute("/_auth/dashboard")({ component: DashboardContent });
 
@@ -245,6 +246,7 @@ function DashboardContent() {
         <MaterialReleases classrooms={classrooms} />
         <LiveWorkspaces />
         <WorkHistoryList role="teacher" />
+        <AuditEventExplorer />
         {archived ? <ArchivedTeaching items={archived} /> : null}
         <StudentManagement />
       </div>

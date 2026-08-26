@@ -105,6 +105,12 @@ export const finishProvision = internalMutation({
       action: "user.provisioned",
       target: { kind: "user", id: studentId },
     });
+    await appendAuditEvent(ctx, {
+      organizationId: args.organizationId,
+      actor: { kind: "user", userId: authenticated.user._id },
+      action: "user.student_role_assigned",
+      target: { kind: "user", id: studentId },
+    });
 
     return studentId;
   },

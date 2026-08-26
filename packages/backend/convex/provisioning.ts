@@ -69,6 +69,12 @@ export const createOrganizationAndTeacher = internalMutation({
       action: "user.provisioned",
       target: { kind: "user", id: teacherId },
     });
+    await appendAuditEvent(ctx, {
+      organizationId,
+      actor: { kind: "developer" },
+      action: "user.teacher_role_assigned",
+      target: { kind: "user", id: teacherId },
+    });
 
     return { organizationId, teacherId };
   },

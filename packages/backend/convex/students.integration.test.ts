@@ -252,6 +252,7 @@ describe("Student credentials", () => {
     );
     expect(events.map((event) => event.action)).toEqual([
       "user.provisioned",
+      "user.student_role_assigned",
       "user.password_reset",
     ]);
     expect(events.every((event) => event.actorUserId === teacher.teacherId)).toBe(true);

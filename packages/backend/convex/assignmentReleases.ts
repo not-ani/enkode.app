@@ -390,13 +390,13 @@ export const removeDeadlineException = mutation({
       )
       .unique();
     if (!existing) return;
-    await ctx.db.delete(existing._id);
     await appendAuditEvent(ctx, {
       organizationId: organization._id,
       actor: { kind: "user", userId: user._id },
       action: "deadline_exception.removed",
       target: { kind: "deadline_exception", id: existing._id },
     });
+    await ctx.db.delete(existing._id);
   },
 });
 
