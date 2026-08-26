@@ -10,6 +10,15 @@ const releasePublicationState = v.union(
   v.literal("published"),
 );
 const materialKind = v.union(v.literal("rich_text"), v.literal("file"), v.literal("external_link"));
+const inlineFeedback = v.object({
+  path: v.string(),
+  snapshotFileContentHash: v.string(),
+  startLine: v.number(),
+  startColumn: v.number(),
+  endLine: v.number(),
+  endColumn: v.number(),
+  body: v.string(),
+});
 
 export default defineSchema({
   organizations: defineTable({
@@ -300,6 +309,39 @@ export default defineSchema({
     .index("by_workspace_attempt", ["workspaceId", "attemptNumber"])
     .index("by_workspace_idempotency", ["workspaceId", "idempotencyKey"])
     .index("by_release_student_attempt", ["assignmentReleaseId", "studentId", "attemptNumber"]),
+
+  grades: defineTable({
+    organizationId: v.id("organizations"),
+    assignmentReleaseId: v.id("assignmentReleases"),
+    studentId: v.id("users"),
+    submissionId: v.id("submissions"),
+    proposedPoints: v.number(),
+    points: v.number(),
+    overallFeedback: v.optional(v.string()),
+    inlineFeedback: v.array(inlineFeedback),
+    latestReturnId: v.optional(v.id("gradeReturns")),
+    updatedBy: v.id("users"),
+    updatedAt: v.number(),
+  })
+    .index("by_release_student", ["assignmentReleaseId", "studentId"])
+    .index("by_submission", ["submissionId"]),
+
+  gradeReturns: defineTable({
+    organizationId: v.id("organizations"),
+    gradeId: v.id("grades"),
+    assignmentReleaseId: v.id("assignmentReleases"),
+    studentId: v.id("users"),
+    submissionId: v.id("submissions"),
+    proposedPoints: v.number(),
+    points: v.number(),
+    overallFeedback: v.optional(v.string()),
+    inlineFeedback: v.array(inlineFeedback),
+    revision: v.number(),
+    returnedBy: v.id("users"),
+    returnedAt: v.number(),
+  })
+    .index("by_grade_revision", ["gradeId", "revision"])
+    .index("by_release_student_revision", ["assignmentReleaseId", "studentId", "revision"]),
 
   auditEvents: defineTable({
     organizationId: v.id("organizations"),

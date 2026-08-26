@@ -12,6 +12,7 @@ import AssignmentReleases, { StudentAssignmentReleases } from "@/components/assi
 import MaterialAuthoring from "@/components/material-authoring";
 import MaterialReleases, { StudentMaterials } from "@/components/material-releases";
 import StudentManagement from "@/components/student-management";
+import Grading from "@/components/grading";
 
 export const Route = createFileRoute("/_auth/dashboard")({ component: DashboardContent });
 
@@ -227,6 +228,7 @@ function DashboardContent() {
         </div>
         <ClassroomEnrollments classrooms={classrooms} />
         <AssignmentReleases classrooms={classrooms} />
+        <Grading classrooms={classrooms} />
         <MaterialReleases classrooms={classrooms} />
         <StudentManagement />
       </div>
