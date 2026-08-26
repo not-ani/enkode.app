@@ -71,6 +71,7 @@ export default defineSchema({
     role,
   })
     .index("by_auth_user", ["authUserId"])
+    .index("by_organization", ["organizationId"])
     .index("by_organization_username", ["organizationId", "username"])
     .index("by_organization_email", ["organizationId", "email"]),
 
@@ -87,6 +88,7 @@ export default defineSchema({
     courseId: v.id("courses"),
     teacherId: v.id("users"),
   })
+    .index("by_organization", ["organizationId"])
     .index("by_course", ["courseId"])
     .index("by_course_teacher", ["courseId", "teacherId"])
     .index("by_teacher", ["teacherId"]),
@@ -113,6 +115,7 @@ export default defineSchema({
     createdBy: v.id("users"),
     createdAt: v.number(),
   })
+    .index("by_organization", ["organizationId"])
     .index("by_assignment", ["assignmentId", "version"])
     .index("by_runtime", ["language", "runtimeVersion"]),
 
@@ -122,7 +125,9 @@ export default defineSchema({
     path: v.string(),
     content: v.string(),
     order: v.number(),
-  }).index("by_version", ["assignmentVersionId", "order"]),
+  })
+    .index("by_organization", ["organizationId"])
+    .index("by_version", ["assignmentVersionId", "order"]),
 
   evaluationTests: defineTable({
     organizationId: v.id("organizations"),
@@ -137,7 +142,9 @@ export default defineSchema({
     passGuidance: v.optional(v.string()),
     failGuidance: v.optional(v.string()),
     order: v.number(),
-  }).index("by_version", ["assignmentVersionId", "order"]),
+  })
+    .index("by_organization", ["organizationId"])
+    .index("by_version", ["assignmentVersionId", "order"]),
 
   materials: defineTable({
     organizationId: v.id("organizations"),
@@ -162,6 +169,7 @@ export default defineSchema({
     createdBy: v.id("users"),
     createdAt: v.number(),
   })
+    .index("by_organization", ["organizationId"])
     .index("by_organization_storage_key", ["organizationId", "storageKey"])
     .index("by_storage_location", ["storageProvider", "storageBucket", "storageKey"]),
 
@@ -175,7 +183,9 @@ export default defineSchema({
     attachmentId: v.optional(v.id("materialAttachments")),
     createdBy: v.id("users"),
     createdAt: v.number(),
-  }).index("by_material", ["materialId", "version"]),
+  })
+    .index("by_organization", ["organizationId"])
+    .index("by_material", ["materialId", "version"]),
 
   classrooms: defineTable({
     organizationId: v.id("organizations"),
@@ -192,6 +202,7 @@ export default defineSchema({
     classroomId: v.id("classrooms"),
     teacherId: v.id("users"),
   })
+    .index("by_organization", ["organizationId"])
     .index("by_classroom", ["classroomId"])
     .index("by_classroom_teacher", ["classroomId", "teacherId"])
     .index("by_teacher", ["teacherId"]),
@@ -203,6 +214,7 @@ export default defineSchema({
     status: v.union(v.literal("active"), v.literal("ended")),
     endedAt: v.optional(v.number()),
   })
+    .index("by_organization", ["organizationId"])
     .index("by_classroom", ["classroomId"])
     .index("by_classroom_student", ["classroomId", "studentId"])
     .index("by_student_status", ["studentId", "status"]),
@@ -224,6 +236,7 @@ export default defineSchema({
     createdBy: v.id("users"),
     createdAt: v.number(),
   })
+    .index("by_organization", ["organizationId"])
     .index("by_classroom", ["classroomId", "order"])
     .index("by_classroom_assignment", ["classroomId", "assignmentId"]),
 
@@ -234,7 +247,9 @@ export default defineSchema({
     toAssignmentVersionId: v.id("assignmentVersions"),
     adoptedBy: v.id("users"),
     adoptedAt: v.number(),
-  }).index("by_release", ["assignmentReleaseId", "adoptedAt"]),
+  })
+    .index("by_organization", ["organizationId"])
+    .index("by_release", ["assignmentReleaseId", "adoptedAt"]),
 
   deadlineExceptions: defineTable({
     organizationId: v.id("organizations"),
@@ -246,6 +261,7 @@ export default defineSchema({
     createdAt: v.number(),
     updatedAt: v.number(),
   })
+    .index("by_organization", ["organizationId"])
     .index("by_release", ["assignmentReleaseId"])
     .index("by_release_student", ["assignmentReleaseId", "studentId"]),
 
@@ -262,6 +278,7 @@ export default defineSchema({
     createdBy: v.id("users"),
     createdAt: v.number(),
   })
+    .index("by_organization", ["organizationId"])
     .index("by_classroom", ["classroomId", "order"])
     .index("by_classroom_material", ["classroomId", "materialId"]),
 
@@ -275,6 +292,7 @@ export default defineSchema({
     updatedAt: v.number(),
     historyAckSequence: v.optional(v.number()),
   })
+    .index("by_organization", ["organizationId"])
     .index("by_release_student", ["assignmentReleaseId", "studentId"])
     .index("by_assignment_release", ["assignmentReleaseId"])
     .index("by_student", ["studentId"]),
@@ -299,6 +317,7 @@ export default defineSchema({
     ),
     historySequence: v.optional(v.number()),
   })
+    .index("by_organization", ["organizationId"])
     .index("by_workspace_status", ["workspaceId", "status"])
     .index("by_adoption", ["adoptionId"]),
 
@@ -318,6 +337,7 @@ export default defineSchema({
     snapshotByteLength: v.optional(v.number()),
     committedAt: v.number(),
   })
+    .index("by_organization", ["organizationId"])
     .index("by_workspace_sequence", ["workspaceId", "startSequence"])
     .index("by_workspace_hash", ["workspaceId", "contentHash"]),
 
@@ -329,7 +349,9 @@ export default defineSchema({
     toAssignmentVersionId: v.string(),
     acceptedPaths: v.array(v.string()),
     committedAt: v.number(),
-  }).index("by_workspace_sequence", ["workspaceId", "sequence"]),
+  })
+    .index("by_organization", ["organizationId"])
+    .index("by_workspace_sequence", ["workspaceId", "sequence"]),
 
   workspaceViewerPresences: defineTable({
     organizationId: v.id("organizations"),
@@ -371,6 +393,7 @@ export default defineSchema({
     ),
     completedAt: v.number(),
   })
+    .index("by_organization", ["organizationId"])
     .index("by_workspace", ["workspaceId", "completedAt"])
     .index("by_student", ["studentId", "completedAt"]),
 
@@ -384,7 +407,9 @@ export default defineSchema({
     byteLength: v.number(),
     files: v.array(v.object({ path: v.string(), contentHash: v.string(), byteLength: v.number() })),
     createdAt: v.number(),
-  }).index("by_workspace", ["workspaceId", "createdAt"]),
+  })
+    .index("by_organization", ["organizationId"])
+    .index("by_workspace", ["workspaceId", "createdAt"]),
 
   submissions: defineTable({
     organizationId: v.id("organizations"),
@@ -423,6 +448,7 @@ export default defineSchema({
     effectiveDeadlineAt: v.optional(v.number()),
     submittedAt: v.number(),
   })
+    .index("by_organization", ["organizationId"])
     .index("by_workspace_attempt", ["workspaceId", "attemptNumber"])
     .index("by_workspace_idempotency", ["workspaceId", "idempotencyKey"])
     .index("by_release_student_attempt", ["assignmentReleaseId", "studentId", "attemptNumber"])
@@ -467,6 +493,7 @@ export default defineSchema({
     reviewedAt: v.optional(v.number()),
     teacherNote: v.optional(v.string()),
   })
+    .index("by_organization", ["organizationId"])
     .index("by_workspace", ["workspaceId", "createdAt"])
     .index("by_related_workspace", ["relatedWorkspaceId", "createdAt"])
     .index("by_evidence_key", ["evidenceKey"]),
@@ -484,6 +511,7 @@ export default defineSchema({
     updatedBy: v.id("users"),
     updatedAt: v.number(),
   })
+    .index("by_organization", ["organizationId"])
     .index("by_release_student", ["assignmentReleaseId", "studentId"])
     .index("by_submission", ["submissionId"]),
 
@@ -501,6 +529,7 @@ export default defineSchema({
     returnedBy: v.id("users"),
     returnedAt: v.number(),
   })
+    .index("by_organization", ["organizationId"])
     .index("by_grade_revision", ["gradeId", "revision"])
     .index("by_release_student_revision", ["assignmentReleaseId", "studentId", "revision"]),
 

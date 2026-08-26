@@ -4,6 +4,7 @@ import { z } from "zod";
 import { internal } from "./_generated/api";
 import { httpAction } from "./_generated/server";
 import { authComponent, createAuth, createProvisioningAuth } from "./auth";
+import { exportOrganizationHttp } from "./organizationExport";
 
 const http = httpRouter();
 
@@ -94,6 +95,12 @@ http.route({
   path: "/api/developer/provision-organization",
   method: "POST",
   handler: provisionOrganization,
+});
+
+http.route({
+  path: "/api/developer/export-organization",
+  method: "POST",
+  handler: exportOrganizationHttp,
 });
 
 export default http;

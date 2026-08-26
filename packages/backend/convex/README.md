@@ -24,6 +24,20 @@ curl "$CONVEX_SITE_URL/api/developer/provision-organization" \
 
 The operation is intentionally absent from the web application. Public Better Auth email signup remains disabled at the backend route; provisioned users sign in with the credential a developer or Teacher issued.
 
+## Organization Export
+
+An authorized developer can request the versioned portable export documented in
+`docs/internals/organization-export-v1.md`:
+
+```sh
+curl "$CONVEX_SITE_URL/api/developer/export-organization" \
+  --request POST \
+  --header "Authorization: Bearer $DEVELOPER_PROVISIONING_SECRET" \
+  --header "Content-Type: application/json" \
+  --data '{"organizationSlug":"example-academy"}' \
+  --output example-academy-enkode-export-v1.json
+```
+
 ## Material attachments
 
 Configure `ENKODE_OBJECT_STORAGE_PROVIDER` and `ENKODE_OBJECT_STORAGE_BUCKET` in the Convex deployment before registering file Materials. The configured upload adapter stores the bytes outside Convex, then passes a provider-neutral receipt containing the object key, original filename, content type, byte size, and SHA-256 digest to Material authoring. Enkode retains that receipt with the immutable Material Version so the attachment can be verified and exported without depending on one storage vendor.

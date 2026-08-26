@@ -20,6 +20,7 @@
   "devDependencies": {
     "@enkode.app/config": "workspace:*",
     "@types/node": "^24.13.3",
+    "ajv": "^8.20.0",
     "convex-test": "0.0.51",
     "typescript": "catalog:",
     "vitest": "^4.1.11"
