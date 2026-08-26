@@ -2,11 +2,23 @@ import { ConvexError, v } from "convex/values";
 
 import type { Doc, Id } from "./_generated/dataModel";
 import type { QueryCtx } from "./_generated/server";
-import { mutation, query } from "./_generated/server";
+import { internal } from "./_generated/api";
+import { internalMutation, mutation, query } from "./_generated/server";
 import { studentVisibleEvaluationTest } from "./assignmentPolicy";
 import { appendAuditEvent } from "./audit";
 import { requireClassroomTeacher, requireRole } from "./authorization";
-import { adjacentOrder, validateReleasePoints } from "./releasePolicy";
+import {
+  adjacentOrder,
+  releasePublicationStatus,
+  validateReleasePoints,
+  validateScheduledFor,
+} from "./releasePolicy";
+
+const publication = v.union(
+  v.literal("immediate"),
+  v.literal("draft"),
+  v.object({ mode: v.literal("scheduled"), scheduledFor: v.number() }),
+);
 
 async function requireActiveEnrollment(
   ctx: QueryCtx,
@@ -35,7 +47,32 @@ async function releaseSummary(ctx: QueryCtx, release: Doc<"assignmentReleases">)
     version: version.version,
     language: version.language,
     runtimeVersion: version.runtimeVersion,
+    publicationStatus: releasePublicationStatus(release),
   };
+}
+
+async function requireEditableRelease(
+  ctx: Parameters<typeof requireClassroomTeacher>[0],
+  assignmentReleaseId: Id<"assignmentReleases">,
+) {
+  const release = await ctx.db.get(assignmentReleaseId);
+  if (!release) throw new ConvexError("Assignment Release not found");
+  const authenticated = await requireClassroomTeacher(ctx, release.classroomId);
+  return { ...authenticated, release };
+}
+
+async function auditRelease(
+  ctx: Parameters<typeof appendAuditEvent>[0],
+  release: Doc<"assignmentReleases">,
+  userId: Id<"users">,
+  action: string,
+) {
+  await appendAuditEvent(ctx, {
+    organizationId: release.organizationId,
+    actor: { kind: "user", userId },
+    action,
+    target: { kind: "assignment_release", id: release._id },
+  });
 }
 
 export const availableVersions = query({
@@ -77,8 +114,9 @@ export const create = mutation({
     classroomId: v.id("classrooms"),
     assignmentVersionId: v.id("assignmentVersions"),
     points: v.number(),
+    publication: v.optional(publication),
   },
-  handler: async (ctx, { classroomId, assignmentVersionId, points }) => {
+  handler: async (ctx, { classroomId, assignmentVersionId, points, publication = "immediate" }) => {
     const { classroom, organization, user } = await requireClassroomTeacher(ctx, classroomId);
     const version = await ctx.db.get(assignmentVersionId);
     if (!version || version.organizationId !== organization._id) {
@@ -101,6 +139,16 @@ export const create = mutation({
       .withIndex("by_classroom", (index) => index.eq("classroomId", classroomId))
       .collect();
     const now = Date.now();
+    const scheduledFor =
+      typeof publication === "object"
+        ? validateScheduledFor(publication.scheduledFor, now)
+        : undefined;
+    const publicationState =
+      publication === "immediate"
+        ? ("published" as const)
+        : publication === "draft"
+          ? ("draft" as const)
+          : ("scheduled" as const);
     const releaseId = await ctx.db.insert("assignmentReleases", {
       organizationId: organization._id,
       classroomId,
@@ -108,7 +156,10 @@ export const create = mutation({
       assignmentVersionId,
       points: validateReleasePoints(points),
       order: releases.length,
-      publishedAt: now,
+      publicationState,
+      scheduledFor,
+      scheduledBy: scheduledFor === undefined ? undefined : user._id,
+      publishedAt: publicationState === "published" ? now : undefined,
       createdBy: user._id,
       createdAt: now,
     });
@@ -118,7 +169,119 @@ export const create = mutation({
       action: "assignment_release.created",
       target: { kind: "assignment_release", id: releaseId },
     });
+    await appendAuditEvent(ctx, {
+      organizationId: organization._id,
+      actor: { kind: "user", userId: user._id },
+      action:
+        publicationState === "published"
+          ? "assignment_release.published"
+          : publicationState === "draft"
+            ? "assignment_release.draft_saved"
+            : "assignment_release.scheduled",
+      target: { kind: "assignment_release", id: releaseId },
+    });
+    if (scheduledFor !== undefined) {
+      await ctx.scheduler.runAt(scheduledFor, internal.assignmentReleases.publishScheduled, {
+        assignmentReleaseId: releaseId,
+        scheduledFor,
+      });
+    }
     return releaseId;
+  },
+});
+
+export const schedule = mutation({
+  args: {
+    assignmentReleaseId: v.id("assignmentReleases"),
+    scheduledFor: v.number(),
+  },
+  handler: async (ctx, { assignmentReleaseId, scheduledFor: requestedTime }) => {
+    const { release, user } = await requireEditableRelease(ctx, assignmentReleaseId);
+    const now = Date.now();
+    if (releasePublicationStatus(release, now) === "published") {
+      throw new ConvexError("A published Assignment Release cannot be scheduled again");
+    }
+    const scheduledFor = validateScheduledFor(requestedTime, now);
+    if (release.publicationState === "scheduled" && release.scheduledFor === scheduledFor) return;
+
+    const action =
+      release.publicationState === "scheduled"
+        ? "assignment_release.schedule_changed"
+        : "assignment_release.scheduled";
+    await ctx.db.patch(release._id, {
+      publicationState: "scheduled",
+      scheduledFor,
+      scheduledBy: user._id,
+      publishedAt: undefined,
+    });
+    await auditRelease(ctx, release, user._id, action);
+    await ctx.scheduler.runAt(scheduledFor, internal.assignmentReleases.publishScheduled, {
+      assignmentReleaseId,
+      scheduledFor,
+    });
+  },
+});
+
+export const cancelSchedule = mutation({
+  args: { assignmentReleaseId: v.id("assignmentReleases") },
+  handler: async (ctx, { assignmentReleaseId }) => {
+    const { release, user } = await requireEditableRelease(ctx, assignmentReleaseId);
+    if (releasePublicationStatus(release) === "published") {
+      throw new ConvexError("A published Assignment Release cannot return to draft");
+    }
+    if (release.publicationState !== "scheduled") return;
+    await ctx.db.patch(release._id, {
+      publicationState: "draft",
+      scheduledFor: undefined,
+      scheduledBy: undefined,
+      publishedAt: undefined,
+    });
+    await auditRelease(ctx, release, user._id, "assignment_release.schedule_canceled");
+  },
+});
+
+export const publishNow = mutation({
+  args: { assignmentReleaseId: v.id("assignmentReleases") },
+  handler: async (ctx, { assignmentReleaseId }) => {
+    const { release, user } = await requireEditableRelease(ctx, assignmentReleaseId);
+    if (releasePublicationStatus(release) === "published") return;
+    await ctx.db.patch(release._id, {
+      publicationState: "published",
+      scheduledFor: undefined,
+      scheduledBy: undefined,
+      publishedAt: Date.now(),
+    });
+    await auditRelease(ctx, release, user._id, "assignment_release.published");
+  },
+});
+
+export const publishScheduled = internalMutation({
+  args: {
+    assignmentReleaseId: v.id("assignmentReleases"),
+    scheduledFor: v.number(),
+  },
+  handler: async (ctx, { assignmentReleaseId, scheduledFor }) => {
+    const release = await ctx.db.get(assignmentReleaseId);
+    if (
+      !release ||
+      release.publicationState !== "scheduled" ||
+      release.scheduledFor !== scheduledFor ||
+      scheduledFor > Date.now()
+    ) {
+      return;
+    }
+    await ctx.db.patch(release._id, {
+      publicationState: "published",
+      scheduledFor: undefined,
+      scheduledBy: undefined,
+      publishedAt: scheduledFor,
+    });
+    await auditRelease(
+      ctx,
+      release,
+      release.scheduledBy ?? release.createdBy,
+      "assignment_release.published",
+    );
   },
 });
 
@@ -180,7 +343,9 @@ export const listMine = query({
           .query("assignmentReleases")
           .withIndex("by_classroom", (index) => index.eq("classroomId", classroom._id))
           .collect();
-        const published = releases.filter(({ publishedAt }) => publishedAt <= Date.now());
+        const published = releases.filter(
+          (release) => releasePublicationStatus(release) === "published",
+        );
         return await Promise.all(
           published.map(async (release) => ({
             ...(await releaseSummary(ctx, release)),
@@ -201,7 +366,7 @@ export const open = query({
     if (
       !release ||
       release.organizationId !== user.organizationId ||
-      release.publishedAt > Date.now()
+      releasePublicationStatus(release) !== "published"
     ) {
       throw new ConvexError("Forbidden");
     }

@@ -4,6 +4,11 @@ import { v } from "convex/values";
 const role = v.union(v.literal("teacher"), v.literal("student"));
 const testKind = v.union(v.literal("input_output"), v.literal("python_harness"));
 const testVisibility = v.union(v.literal("public"), v.literal("hidden"));
+const releasePublicationState = v.union(
+  v.literal("draft"),
+  v.literal("scheduled"),
+  v.literal("published"),
+);
 
 export default defineSchema({
   organizations: defineTable({
@@ -119,7 +124,10 @@ export default defineSchema({
     assignmentVersionId: v.id("assignmentVersions"),
     points: v.number(),
     order: v.number(),
-    publishedAt: v.number(),
+    publicationState: v.optional(releasePublicationState),
+    scheduledFor: v.optional(v.number()),
+    scheduledBy: v.optional(v.id("users")),
+    publishedAt: v.optional(v.number()),
     submissionLimit: v.optional(v.number()),
     createdBy: v.id("users"),
     createdAt: v.number(),

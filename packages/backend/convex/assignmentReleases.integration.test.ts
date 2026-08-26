@@ -1,7 +1,7 @@
 import { convexTest } from "convex-test";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { api } from "./_generated/api";
+import { api, internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 import schema from "./schema";
 
@@ -98,6 +98,10 @@ async function seedReleaseContext(backend: ReturnType<typeof createTestBackend>)
 }
 
 describe("Assignment Releases", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("releases an exact version with immediate, unlimited, classroom-owned defaults", async () => {
     const backend = createTestBackend();
     const { classroomId, first, teacher, teacherId } = await seedReleaseContext(backend);
@@ -115,6 +119,7 @@ describe("Assignment Releases", () => {
       createdBy: teacherId,
       order: 0,
       points: 25,
+      publicationState: "published",
     });
     expect(release?.publishedAt).toEqual(expect.any(Number));
     expect(release?.submissionLimit).toBeUndefined();
@@ -132,6 +137,195 @@ describe("Assignment Releases", () => {
         version: 1,
       }),
     ]);
+  });
+
+  it("keeps explicit drafts inaccessible to Students until a teacher publishes them", async () => {
+    const backend = createTestBackend();
+    const { classroomId, first, teacher } = await seedReleaseContext(backend);
+    const student = backend.withIdentity({ subject: "auth-student" });
+    const releaseId = await teacher.mutation(api.assignmentReleases.create, {
+      classroomId,
+      assignmentVersionId: first.assignmentVersionId,
+      points: 10,
+      publication: "draft",
+    });
+
+    expect(await student.query(api.assignmentReleases.listMine, {})).toEqual([]);
+    await expect(
+      student.query(api.assignmentReleases.open, { assignmentReleaseId: releaseId }),
+    ).rejects.toThrow("Forbidden");
+
+    await teacher.mutation(api.assignmentReleases.publishNow, { assignmentReleaseId: releaseId });
+    await teacher.mutation(api.assignmentReleases.publishNow, { assignmentReleaseId: releaseId });
+
+    expect(await student.query(api.assignmentReleases.listMine, {})).toEqual([
+      expect.objectContaining({ _id: releaseId, publicationStatus: "published" }),
+    ]);
+    const events = await backend.run(async (ctx) =>
+      ctx.db
+        .query("auditEvents")
+        .withIndex("by_target", (index) =>
+          index.eq("targetKind", "assignment_release").eq("targetId", releaseId),
+        )
+        .collect(),
+    );
+    expect(events.map(({ action }) => action)).toEqual([
+      "assignment_release.created",
+      "assignment_release.draft_saved",
+      "assignment_release.published",
+    ]);
+  });
+
+  it("derives scheduled visibility at the release instant and publishes idempotently", async () => {
+    vi.useFakeTimers();
+    const now = Date.UTC(2026, 7, 26, 18, 0, 0);
+    vi.setSystemTime(now);
+    const backend = createTestBackend();
+    const { classroomId, first, teacher } = await seedReleaseContext(backend);
+    const student = backend.withIdentity({ subject: "auth-student" });
+    const scheduledFor = now + 60_000;
+    const releaseId = await teacher.mutation(api.assignmentReleases.create, {
+      classroomId,
+      assignmentVersionId: first.assignmentVersionId,
+      points: 10,
+      publication: { mode: "scheduled", scheduledFor },
+    });
+
+    expect(await student.query(api.assignmentReleases.listMine, {})).toEqual([]);
+    vi.setSystemTime(scheduledFor);
+    expect(await student.query(api.assignmentReleases.listMine, {})).toEqual([
+      expect.objectContaining({ _id: releaseId, publicationStatus: "published" }),
+    ]);
+    expect(
+      await student.query(api.assignmentReleases.open, { assignmentReleaseId: releaseId }),
+    ).toMatchObject({ _id: releaseId });
+
+    await backend.mutation(internal.assignmentReleases.publishScheduled, {
+      assignmentReleaseId: releaseId,
+      scheduledFor,
+    });
+    await backend.mutation(internal.assignmentReleases.publishScheduled, {
+      assignmentReleaseId: releaseId,
+      scheduledFor,
+    });
+
+    const { events, release } = await backend.run(async (ctx) => ({
+      release: await ctx.db.get(releaseId as Id<"assignmentReleases">),
+      events: await ctx.db
+        .query("auditEvents")
+        .withIndex("by_target", (index) =>
+          index.eq("targetKind", "assignment_release").eq("targetId", releaseId),
+        )
+        .collect(),
+    }));
+    expect(release).toMatchObject({ publicationState: "published", publishedAt: scheduledFor });
+    expect(events.filter(({ action }) => action === "assignment_release.published")).toHaveLength(
+      1,
+    );
+  });
+
+  it("changes and cancels schedules without changing the selected Assignment Version", async () => {
+    vi.useFakeTimers();
+    const now = Date.UTC(2026, 7, 26, 18, 0, 0);
+    vi.setSystemTime(now);
+    const backend = createTestBackend();
+    const { classroomId, first, teacher } = await seedReleaseContext(backend);
+    const student = backend.withIdentity({ subject: "auth-student" });
+    const releaseId = await teacher.mutation(api.assignmentReleases.create, {
+      classroomId,
+      assignmentVersionId: first.assignmentVersionId,
+      points: 10,
+      publication: "draft",
+    });
+    const firstTime = now + 60_000;
+    const changedTime = now + 120_000;
+
+    await teacher.mutation(api.assignmentReleases.schedule, {
+      assignmentReleaseId: releaseId,
+      scheduledFor: firstTime,
+    });
+    await teacher.mutation(api.assignmentReleases.schedule, {
+      assignmentReleaseId: releaseId,
+      scheduledFor: changedTime,
+    });
+    await teacher.mutation(api.assignmentReleases.schedule, {
+      assignmentReleaseId: releaseId,
+      scheduledFor: changedTime,
+    });
+    vi.setSystemTime(firstTime);
+    await backend.mutation(internal.assignmentReleases.publishScheduled, {
+      assignmentReleaseId: releaseId,
+      scheduledFor: firstTime,
+    });
+    await teacher.mutation(api.assignmentReleases.cancelSchedule, {
+      assignmentReleaseId: releaseId,
+    });
+    await teacher.mutation(api.assignmentReleases.cancelSchedule, {
+      assignmentReleaseId: releaseId,
+    });
+    vi.setSystemTime(changedTime);
+    await backend.mutation(internal.assignmentReleases.publishScheduled, {
+      assignmentReleaseId: releaseId,
+      scheduledFor: changedTime,
+    });
+
+    const release = await backend.run((ctx) => ctx.db.get(releaseId as Id<"assignmentReleases">));
+    expect(release).toMatchObject({
+      assignmentVersionId: first.assignmentVersionId,
+      publicationState: "draft",
+    });
+    expect(release?.scheduledFor).toBeUndefined();
+    expect(await student.query(api.assignmentReleases.listMine, {})).toEqual([]);
+    const events = await backend.run(async (ctx) =>
+      ctx.db
+        .query("auditEvents")
+        .withIndex("by_target", (index) =>
+          index.eq("targetKind", "assignment_release").eq("targetId", releaseId),
+        )
+        .collect(),
+    );
+    expect(events.map(({ action }) => action)).toEqual([
+      "assignment_release.created",
+      "assignment_release.draft_saved",
+      "assignment_release.scheduled",
+      "assignment_release.schedule_changed",
+      "assignment_release.schedule_canceled",
+    ]);
+  });
+
+  it("rejects non-future schedules and publication changes by unassigned Teachers", async () => {
+    const backend = createTestBackend();
+    const { classroomId, first, teacher } = await seedReleaseContext(backend);
+    const releaseId = await teacher.mutation(api.assignmentReleases.create, {
+      classroomId,
+      assignmentVersionId: first.assignmentVersionId,
+      points: 10,
+      publication: "draft",
+    });
+    const unassigned = backend.withIdentity({ subject: "auth-unassigned" });
+
+    await expect(
+      teacher.mutation(api.assignmentReleases.schedule, {
+        assignmentReleaseId: releaseId,
+        scheduledFor: Date.now(),
+      }),
+    ).rejects.toThrow("must be a future date and time");
+    await expect(
+      unassigned.mutation(api.assignmentReleases.schedule, {
+        assignmentReleaseId: releaseId,
+        scheduledFor: Date.now() + 60_000,
+      }),
+    ).rejects.toThrow("Forbidden");
+    await expect(
+      unassigned.mutation(api.assignmentReleases.cancelSchedule, {
+        assignmentReleaseId: releaseId,
+      }),
+    ).rejects.toThrow("Forbidden");
+    await expect(
+      unassigned.mutation(api.assignmentReleases.publishNow, {
+        assignmentReleaseId: releaseId,
+      }),
+    ).rejects.toThrow("Forbidden");
   });
 
   it("lets Classroom Teachers order releases independently of Course authoring order", async () => {
@@ -282,9 +476,10 @@ describe("Assignment Releases", () => {
     );
     expect(events.map(({ action }) => action)).toEqual([
       "assignment_release.created",
+      "assignment_release.published",
       "assignment_release.reordered",
     ]);
     expect(events.every(({ actorUserId }) => actorUserId === teacherId)).toBe(true);
-    expect(new Set(events.map(({ _id }) => _id)).size).toBe(2);
+    expect(new Set(events.map(({ _id }) => _id)).size).toBe(3);
   });
 });
