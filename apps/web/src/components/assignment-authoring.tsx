@@ -8,7 +8,8 @@ import { useState, type FormEvent } from "react";
 import ArchiveActions from "./archive-actions";
 
 type AssignmentSummary = { _id: string; title: string; latestVersion: number };
-type TestKind = "input_output" | "python_harness";
+type Language = "python" | "java";
+type TestKind = "input_output" | "python_harness" | "java_harness";
 type Visibility = "public" | "hidden";
 type StarterFile = { id: string; path: string; content: string };
 type EvaluationTest = {
@@ -51,6 +52,7 @@ function newTest(): EvaluationTest {
 
 function initialDraft() {
   return {
+    language: "python" as Language,
     title: "",
     instructions: "",
     entrypoint: "main.py",
@@ -63,9 +65,10 @@ export default function AssignmentAuthoring({ courseId }: { courseId: string }) 
   const assignments = useQuery(api.assignments.listByCourse, { courseId }) as
     | AssignmentSummary[]
     | undefined;
-  const runtime = useQuery(api.assignments.supportedRuntime, { courseId }) as
-    | { language: "python"; version: string }
+  const runtimes = useQuery(api.assignments.supportedRuntimes, { courseId }) as
+    | { language: Language; version: string }[]
     | undefined;
+  const selectedRuntime = runtimes?.find(({ language }) => language === draft.language);
   const createAssignment = useMutation(api.assignments.create);
   const createVersion = useMutation(api.assignments.createVersion);
   const [draft, setDraft] = useState(initialDraft);
@@ -90,12 +93,13 @@ export default function AssignmentAuthoring({ courseId }: { courseId: string }) 
 
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!runtime) return;
+    if (!selectedRuntime) return;
     setSaving(true);
     setError(undefined);
     const version = {
       instructions: draft.instructions,
-      runtimeVersion: runtime.version,
+      language: draft.language,
+      runtimeVersion: selectedRuntime.version,
       entrypoint: draft.entrypoint,
       starterFiles: draft.files.map(({ path, content }) => ({ path, content })),
       evaluationTests: draft.tests.map((test) => ({
@@ -105,7 +109,7 @@ export default function AssignmentAuthoring({ courseId }: { courseId: string }) 
         weight: Number(test.weight),
         stdin: test.kind === "input_output" ? test.stdin : undefined,
         expectedOutput: test.kind === "input_output" ? test.expectedOutput : undefined,
-        harness: test.kind === "python_harness" ? test.harness : undefined,
+        harness: test.kind === "input_output" ? undefined : test.harness,
         passGuidance: test.passGuidance || undefined,
         failGuidance: test.failGuidance || undefined,
       })),
@@ -129,7 +133,7 @@ export default function AssignmentAuthoring({ courseId }: { courseId: string }) 
         <div>
           <p className="font-medium text-base sm:text-sm">Assignments</p>
           <p className="text-muted-foreground text-base sm:text-sm">
-            Immutable Python content for this Course.
+            Immutable Python and Java content for this Course.
           </p>
         </div>
         {authoring ? (
@@ -192,7 +196,7 @@ export default function AssignmentAuthoring({ courseId }: { courseId: string }) 
         </Button>
       ) : (
         <form className="flex flex-col gap-5" onSubmit={save}>
-          <div className="grid gap-3 @md:grid-cols-2">
+          <div className="grid gap-3 @md:grid-cols-3">
             {versioning ? (
               <p className="font-medium text-base sm:text-sm">New version of {versioning.title}</p>
             ) : (
@@ -206,6 +210,37 @@ export default function AssignmentAuthoring({ courseId }: { courseId: string }) 
               </label>
             )}
             <label className="flex flex-col gap-1.5 text-base sm:text-sm">
+              Language
+              <select
+                className="border-input bg-background h-8 border px-2 text-xs"
+                value={draft.language}
+                onChange={(event) => {
+                  const language = event.target.value as Language;
+                  const java = language === "java";
+                  setDraft({
+                    ...draft,
+                    language,
+                    entrypoint: java ? "Main.java" : "main.py",
+                    files: java
+                      ? [newFile("Main.java"), newFile("Helpers.java")]
+                      : [newFile("main.py"), newFile("helpers.py")],
+                    tests: draft.tests.map((test) => ({
+                      ...test,
+                      kind:
+                        test.kind === "input_output"
+                          ? test.kind
+                          : java
+                            ? "java_harness"
+                            : "python_harness",
+                    })),
+                  });
+                }}
+              >
+                <option value="python">Python</option>
+                <option value="java">Java</option>
+              </select>
+            </label>
+            <label className="flex flex-col gap-1.5 text-base sm:text-sm">
               Fixed entrypoint
               <Input
                 required
@@ -215,7 +250,8 @@ export default function AssignmentAuthoring({ courseId }: { courseId: string }) 
             </label>
           </div>
           <p className="text-muted-foreground text-base sm:text-sm">
-            Runtime: Python {runtime?.version ?? "loading…"} (exactly pinned)
+            Runtime: {draft.language === "java" ? "Java" : "Python"}{" "}
+            {selectedRuntime?.version ?? "loading…"} (exactly pinned)
           </p>
           <label className="flex flex-col gap-1.5 text-base sm:text-sm">
             Instructions
@@ -297,7 +333,9 @@ export default function AssignmentAuthoring({ courseId }: { courseId: string }) 
                     }
                   >
                     <option value="input_output">Input/output</option>
-                    <option value="python_harness">Python harness</option>
+                    <option value={`${draft.language}_harness`}>
+                      {draft.language === "java" ? "Java" : "Python"} harness
+                    </option>
                   </select>
                   <select
                     aria-label="Evaluation Test visibility"
@@ -339,8 +377,12 @@ export default function AssignmentAuthoring({ courseId }: { courseId: string }) 
                   </div>
                 ) : (
                   <Textarea
-                    aria-label="Python harness source"
-                    placeholder="Python assertion or supported test harness"
+                    aria-label={`${draft.language === "java" ? "Java" : "Python"} harness source`}
+                    placeholder={
+                      draft.language === "java"
+                        ? "Java statements run inside a generated test main method"
+                        : "Python assertion or supported test harness"
+                    }
                     required
                     value={test.harness}
                     onChange={(event) => updateTest(test.id, { harness: event.target.value })}
@@ -375,7 +417,7 @@ export default function AssignmentAuthoring({ courseId }: { courseId: string }) 
             ))}
           </fieldset>
           {error ? <p className="text-destructive text-base sm:text-sm">{error}</p> : null}
-          <Button type="submit" className="self-start" disabled={saving || !runtime}>
+          <Button type="submit" className="self-start" disabled={saving || !selectedRuntime}>
             {saving ? "Saving…" : versioning ? "Create immutable version" : "Create Assignment"}
           </Button>
         </form>

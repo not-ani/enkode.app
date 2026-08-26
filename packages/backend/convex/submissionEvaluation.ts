@@ -1,5 +1,5 @@
 import type { Doc } from "./_generated/dataModel";
-import type { ExecutionFile, ExecutionService } from "./execution";
+import type { ExecutionFile, ExecutionLanguage, ExecutionService } from "./execution";
 import { evaluateTest } from "./runEvaluation";
 
 type EvaluationTest = Doc<"evaluationTests">;
@@ -8,13 +8,14 @@ export async function evaluateSubmission(
   execution: ExecutionService,
   input: {
     runtimeVersion: string;
+    language: ExecutionLanguage;
     entrypoint: string;
     files: ExecutionFile[];
     tests: EvaluationTest[];
   },
 ) {
   const executionResult = await execution.execute({
-    runtime: { language: "python", version: input.runtimeVersion },
+    runtime: { language: input.language, version: input.runtimeVersion },
     entrypoint: input.entrypoint,
     files: input.files,
   });

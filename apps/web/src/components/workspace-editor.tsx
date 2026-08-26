@@ -22,10 +22,11 @@ import {
 
 import { WebSocketLanguageServiceTransport } from "@/lib/language-service-websocket";
 import {
+  RemoteLanguageService,
   type LanguageIntelligenceState,
-  RemotePythonLanguageService,
-} from "@/lib/python-language-service";
-import { registerPythonMonacoAdapter } from "@/lib/python-monaco-adapter";
+  type RemoteLanguage,
+} from "@/lib/remote-language-service";
+import { registerRemoteMonacoAdapter } from "@/lib/remote-monaco-adapter";
 import {
   createLocalWorkspaceDraftStore,
   createWorkspaceState,
@@ -44,6 +45,7 @@ type WorkspaceEditorProps = {
   assignmentReleaseId: string;
   workspaceId: string;
   files: WorkspaceFile[];
+  language: RemoteLanguage;
   entrypoint: string;
   runtimeVersion: string;
   onSave: (files: WorkspaceFile[]) => Promise<void>;
@@ -106,6 +108,7 @@ export default function WorkspaceEditor({
   assignmentReleaseId,
   workspaceId,
   files,
+  language,
   entrypoint,
   runtimeVersion,
   onSave,
@@ -139,11 +142,15 @@ export default function WorkspaceEditor({
   const [mergeState, setMergeState] = useState<"idle" | "applying">("idle");
   const languageService = useMemo(
     () =>
-      new RemotePythonLanguageService(
-        env.VITE_PYRIGHT_LANGUAGE_SERVICE_URL,
+      new RemoteLanguageService(
+        language,
+        language === "java" ? "jdtls" : "pyright",
+        language === "java"
+          ? env.VITE_JDTLS_LANGUAGE_SERVICE_URL
+          : env.VITE_PYRIGHT_LANGUAGE_SERVICE_URL,
         new WebSocketLanguageServiceTransport(),
       ),
-    [],
+    [language],
   );
   const [intelligenceState, setIntelligenceState] = useState<LanguageIntelligenceState>(() =>
     languageService.getState(),
@@ -165,20 +172,25 @@ export default function WorkspaceEditor({
   useEffect(() => {
     void languageService.connect({
       workspaceId,
-      runtime: { language: "python", version: runtimeVersion },
+      runtime: { language, version: runtimeVersion },
       files: initialFiles.current,
     });
     return () => languageService.disconnect();
-  }, [languageService, runtimeVersion, workspaceId]);
+  }, [language, languageService, runtimeVersion, workspaceId]);
 
   useEffect(() => () => monacoAdapter.current?.dispose(), []);
 
   const prepareMonaco = useCallback(
     (monaco: typeof Monaco) => {
       monacoAdapter.current?.dispose();
-      monacoAdapter.current = registerPythonMonacoAdapter(monaco, languageService, workspaceId);
+      monacoAdapter.current = registerRemoteMonacoAdapter(
+        monaco,
+        languageService,
+        workspaceId,
+        language,
+      );
     },
-    [languageService, workspaceId],
+    [language, languageService, workspaceId],
   );
 
   useEffect(() => {
@@ -430,6 +442,7 @@ export default function WorkspaceEditor({
             <p className="truncate font-mono text-sm">{activeFile.path}</p>
             <div className="flex items-center gap-3">
               <LanguageIntelligenceStatus
+                language={language}
                 state={intelligenceState}
                 reconnect={() => void languageService.reconnect()}
               />
@@ -476,7 +489,7 @@ export default function WorkspaceEditor({
             >
               <MonacoEditor
                 height="100%"
-                language="python"
+                language={language}
                 path={`enkode://${workspaceId}/${activeFile.path}`}
                 value={activeFile.content}
                 beforeMount={prepareMonaco}
@@ -692,17 +705,20 @@ function RunResults({ result }: { result: RunResult }) {
 }
 
 function LanguageIntelligenceStatus({
+  language,
   state,
   reconnect,
 }: {
+  language: RemoteLanguage;
   state: LanguageIntelligenceState;
   reconnect: () => void;
 }) {
+  const languageName = language === "java" ? "Java" : "Python";
   const label = {
     disconnected: "Intelligence disconnected",
     connecting: "Intelligence connecting…",
-    ready: "Python intelligence ready",
-    failed: "Python intelligence unavailable",
+    ready: `${languageName} intelligence ready`,
+    failed: `${languageName} intelligence unavailable`,
   }[state.status];
   return (
     <div className="flex items-center gap-2">

@@ -23,7 +23,10 @@ afterEach(() => {
   }
 });
 
-async function seed(backend: ReturnType<typeof convexTest>) {
+async function seed(
+  backend: ReturnType<typeof convexTest>,
+  language: "python" | "java" = "python",
+) {
   return await backend.run(async (ctx) => {
     const organizationId = await ctx.db.insert("organizations", { name: "North", slug: "north" });
     const studentId = await ctx.db.insert("users", {
@@ -60,9 +63,9 @@ async function seed(backend: ReturnType<typeof convexTest>) {
       assignmentId,
       version: 1,
       instructions: "Hello",
-      language: "python",
-      runtimeVersion: "3.12.0",
-      entrypoint: "main.py",
+      language,
+      runtimeVersion: language === "java" ? "15.0.2" : "3.12.0",
+      entrypoint: language === "java" ? "Main.java" : "main.py",
       createdBy: teacherId,
       createdAt: 1,
     });
@@ -70,11 +73,12 @@ async function seed(backend: ReturnType<typeof convexTest>) {
       organizationId,
       assignmentVersionId,
       name: "Secret edge",
-      kind: "input_output",
+      kind: language === "java" ? "java_harness" : "input_output",
       visibility: "hidden",
       weight: 3,
-      stdin: "secret input",
-      expectedOutput: "secret output",
+      stdin: language === "java" ? undefined : "secret input",
+      expectedOutput: language === "java" ? undefined : "secret output",
+      harness: language === "java" ? "    Main.greet();" : undefined,
       failGuidance: "Try an empty value.",
       order: 0,
     });
@@ -90,10 +94,19 @@ async function seed(backend: ReturnType<typeof convexTest>) {
       createdBy: teacherId,
       createdAt: 1,
     });
-    const files = [
-      { path: "main.py", content: "from helper import answer\nprint(answer)\n" },
-      { path: "helper.py", content: "answer = 42\n" },
-    ];
+    const files =
+      language === "java"
+        ? [
+            {
+              path: "Main.java",
+              content:
+                'public class Main { static void greet() { System.out.println("hello"); } public static void main(String[] args) { greet(); } }\n',
+            },
+          ]
+        : [
+            { path: "main.py", content: "from helper import answer\nprint(answer)\n" },
+            { path: "helper.py", content: "answer = 42\n" },
+          ];
     const workspaceId = await ctx.db.insert("workspaces", {
       organizationId,
       assignmentReleaseId,
@@ -179,6 +192,73 @@ describe("immutable Submission attempts", () => {
     );
     expect(requests.filter(({ url }) => url.includes("/api/v2/execute"))).toHaveLength(2);
     expect(await backend.run(async (ctx) => ctx.db.query("submissions").collect())).toHaveLength(1);
+  });
+
+  it("submits Java with the exact runtime while redacting hidden harness details", async () => {
+    const backend = convexTest(schema, modules);
+    const seeded = await seed(backend, "java");
+    const historySnapshot = gzipSync(
+      JSON.stringify({
+        version: 1,
+        workspaceId: seeded.workspaceId,
+        sequence: 1,
+        files: seeded.files,
+      }),
+    );
+    const historySnapshotHash = createHash("sha256").update(historySnapshot).digest("hex");
+    await backend.mutation(internal.workHistory.commitChunk, {
+      workspaceId: seeded.workspaceId,
+      organizationId: seeded.organizationId,
+      studentId: seeded.studentId,
+      startSequence: 1,
+      endSequence: 1,
+      eventCount: 1,
+      contentHash: "java-history-hash",
+      objectKey: "history/java-1.gz",
+      byteLength: 1,
+      snapshotHash: historySnapshotHash,
+      snapshotObjectKey: "snapshots/java-1.gz",
+      snapshotByteLength: historySnapshot.byteLength,
+    });
+    const executionRequests: Record<string, unknown>[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+        const headers = new Headers(init?.headers);
+        if ((init?.method ?? "GET") === "GET") return new Response(historySnapshot);
+        if (headers.get("content-type") === "application/gzip") return new Response(null);
+        executionRequests.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+        return new Response(
+          JSON.stringify({ run: { stdout: "hello\n", stderr: "", code: 0, signal: null } }),
+        );
+      }),
+    );
+    process.env.ENKODE_EXECUTION_ENDPOINT = "https://execute.example.test";
+    process.env.ENKODE_OBJECT_STORAGE_ENDPOINT = "https://objects.example.test";
+    process.env.ENKODE_OBJECT_STORAGE_BUCKET = "enkode";
+    process.env.ENKODE_OBJECT_STORAGE_REGION = "auto";
+    process.env.ENKODE_OBJECT_STORAGE_ACCESS_KEY_ID = "access";
+    process.env.ENKODE_OBJECT_STORAGE_SECRET_ACCESS_KEY = "secret";
+
+    const result = await backend
+      .withIdentity({ subject: "auth-student" })
+      .action(api.submissionUpload.submit, {
+        workspaceId: seeded.workspaceId,
+        files: seeded.files,
+        requiredHistorySequence: 1,
+        idempotencyKey: "java-submit",
+      });
+
+    expect(executionRequests).toHaveLength(2);
+    expect(executionRequests.every(({ language }) => language === "java")).toBe(true);
+    expect(executionRequests.every(({ version }) => version === "15.0.2")).toBe(true);
+    expect(result).toMatchObject({
+      language: "java",
+      runtimeVersion: "15.0.2",
+      testResults: [{ visibility: "hidden", weight: 3, passed: true }],
+    });
+    expect(JSON.stringify(result)).not.toContain("__enkode_hidden_test_0");
+    expect(JSON.stringify(result)).not.toContain("Main.greet");
   });
 
   it("rejects files that do not match the acknowledged Work History snapshot", async () => {

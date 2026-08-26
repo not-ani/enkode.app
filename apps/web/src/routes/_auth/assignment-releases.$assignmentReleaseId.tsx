@@ -20,6 +20,7 @@ type Release = {
   assignmentTitle: string;
   classroomName: string;
   instructions: string;
+  language: "python" | "java";
   runtimeVersion: string;
   entrypoint: string;
   version: number;
@@ -28,6 +29,7 @@ type Release = {
 type Workspace = {
   _id: string;
   files: WorkspaceFile[];
+  language: "python" | "java";
   runtimeVersion: string;
   entrypoint: string;
   version: number;
@@ -130,7 +132,8 @@ function AssignmentWorkspaceRoute() {
             </h1>
           </div>
           <p className="text-sm text-muted-foreground">
-            Python {workspace.runtimeVersion} · Workspace Version {workspace.version}
+            {workspace.language === "java" ? "Java" : "Python"} {workspace.runtimeVersion} ·
+            Workspace Version {workspace.version}
             {workspace.versionMerge ? ` · Release Version ${release.version}` : ""} · Editing
             available
           </p>
@@ -146,6 +149,7 @@ function AssignmentWorkspaceRoute() {
           assignmentReleaseId={assignmentReleaseId}
           workspaceId={workspace._id}
           files={workspace.files}
+          language={workspace.language}
           entrypoint={workspace.entrypoint}
           runtimeVersion={workspace.runtimeVersion}
           versionMerge={workspace.versionMerge}

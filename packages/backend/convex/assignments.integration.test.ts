@@ -3,7 +3,11 @@ import { describe, expect, it } from "vitest";
 
 import { api } from "./_generated/api";
 import { studentVisibleEvaluationTest } from "./assignmentPolicy";
-import { maintainedPythonRuntime, runtimeCanBeRemoved } from "./runtimeCatalog";
+import {
+  maintainedJavaRuntime,
+  maintainedPythonRuntime,
+  runtimeCanBeRemoved,
+} from "./runtimeCatalog";
 import schema from "./schema";
 
 const modules = import.meta.glob("./**/*.ts");
@@ -238,5 +242,109 @@ describe("immutable Python Assignment Versions", () => {
     expect(await backend.run((ctx) => runtimeCanBeRemoved(ctx, maintainedPythonRuntime))).toBe(
       false,
     );
+  });
+});
+
+describe("immutable Java Assignment Versions", () => {
+  const javaVersion = {
+    language: "java" as const,
+    instructions: "Print a greeting.",
+    runtimeVersion: maintainedJavaRuntime.version,
+    entrypoint: "Main.java",
+    starterFiles: [
+      {
+        path: "Main.java",
+        content: "public class Main { public static void main(String[] args) {} }\n",
+      },
+      { path: "Greeting.java", content: "class Greeting {}\n" },
+    ],
+    evaluationTests: [
+      {
+        name: "greets",
+        kind: "input_output" as const,
+        visibility: "public" as const,
+        weight: 2,
+        stdin: "",
+        expectedOutput: "hello\n",
+      },
+      {
+        name: "constructs a greeting",
+        kind: "java_harness" as const,
+        visibility: "hidden" as const,
+        weight: 3,
+        harness: "    new Greeting();",
+        failGuidance: "Check the Greeting constructor.",
+      },
+    ],
+  };
+
+  it("authors Java with the maintained runtime, native tests, and retention", async () => {
+    const backend = createTestBackend();
+    const { courseId } = await seedCourse(backend);
+    const collaborator = backend.withIdentity({ subject: "auth-collaborator" });
+
+    await expect(
+      collaborator.query(api.assignments.supportedRuntimes, { courseId }),
+    ).resolves.toEqual([maintainedPythonRuntime, maintainedJavaRuntime]);
+    expect(await backend.run((ctx) => runtimeCanBeRemoved(ctx, maintainedJavaRuntime))).toBe(true);
+    const created = await collaborator.mutation(api.assignments.create, {
+      courseId,
+      title: "Hello Java",
+      ...javaVersion,
+    });
+    const version = await collaborator.query(api.assignments.getVersion, {
+      assignmentVersionId: created.assignmentVersionId,
+    });
+
+    expect(version).toMatchObject({
+      language: "java",
+      runtimeVersion: maintainedJavaRuntime.version,
+      entrypoint: "Main.java",
+    });
+    expect(version.evaluationTests.map(({ kind }: { kind: string }) => kind)).toEqual([
+      "input_output",
+      "java_harness",
+    ]);
+    expect(await backend.run((ctx) => runtimeCanBeRemoved(ctx, maintainedJavaRuntime))).toBe(false);
+  });
+
+  it("rejects unpinned Java runtimes, invalid entrypoints, and cross-language harnesses", async () => {
+    const backend = createTestBackend();
+    const { courseId } = await seedCourse(backend);
+    const collaborator = backend.withIdentity({ subject: "auth-collaborator" });
+
+    await expect(
+      collaborator.mutation(api.assignments.create, {
+        courseId,
+        title: "Floating Java",
+        ...javaVersion,
+        runtimeVersion: "15",
+      }),
+    ).rejects.toThrow("exactly pinned maintained Java runtime");
+    await expect(
+      collaborator.mutation(api.assignments.create, {
+        courseId,
+        title: "Wrong entrypoint",
+        ...javaVersion,
+        entrypoint: "main.py",
+        starterFiles: [{ path: "main.py", content: "" }],
+      }),
+    ).rejects.toThrow("Java entrypoint must end in .java");
+    await expect(
+      collaborator.mutation(api.assignments.create, {
+        courseId,
+        title: "Wrong harness",
+        ...javaVersion,
+        evaluationTests: [
+          {
+            name: "Python-only",
+            kind: "python_harness",
+            visibility: "public",
+            weight: 1,
+            harness: "assert True",
+          },
+        ],
+      }),
+    ).rejects.toThrow("Harness tests must match the java Assignment language");
   });
 });

@@ -14,6 +14,7 @@ type LiveWorkspace = {
   classroomName: string;
   studentDisplayName: string;
   studentUsername: string;
+  language: "python" | "java";
   entrypoint: string;
   runtimeVersion: string;
 };
@@ -82,8 +83,8 @@ export default function LiveWorkspaceViewer({ workspaceId }: { workspaceId: stri
         <p className="text-sm text-muted-foreground">{workspace.classroomName}</p>
         <h1 className="text-2xl font-semibold tracking-tight">{workspace.assignmentTitle}</h1>
         <p className="text-sm text-muted-foreground">
-          Viewing {workspace.studentDisplayName} (@{workspace.studentUsername}) · Python{" "}
-          {workspace.runtimeVersion}
+          Viewing {workspace.studentDisplayName} (@{workspace.studentUsername}) ·{" "}
+          {workspace.language === "java" ? "Java" : "Python"} {workspace.runtimeVersion}
         </p>
       </header>
       <p className="border-y border-foreground/10 py-3 text-sm text-muted-foreground">
@@ -127,7 +128,7 @@ export default function LiveWorkspaceViewer({ workspaceId }: { workspaceId: stri
             >
               <MonacoEditor
                 height="100%"
-                language="python"
+                language={workspace.language}
                 path={`enkode-live://${workspaceId}/${selectedPath}`}
                 value={selectedFile?.content ?? ""}
                 options={{

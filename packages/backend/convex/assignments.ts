@@ -7,12 +7,16 @@ import { validateEvaluationTest, validateFilePath } from "./assignmentPolicy";
 import { appendAuditEvent } from "./audit";
 import { requireCourseCollaborator } from "./authorization";
 import { requireWritableAssignment, requireWritableCourse } from "./lifecycleGuards";
-import { maintainedPythonRuntime, requireMaintainedPythonRuntime } from "./runtimeCatalog";
+import {
+  maintainedRuntimes,
+  requireMaintainedRuntime,
+  type SupportedLanguage,
+} from "./runtimeCatalog";
 
 const starterFile = v.object({ path: v.string(), content: v.string() });
 const evaluationTest = v.object({
   name: v.string(),
-  kind: v.union(v.literal("input_output"), v.literal("python_harness")),
+  kind: v.union(v.literal("input_output"), v.literal("python_harness"), v.literal("java_harness")),
   visibility: v.union(v.literal("public"), v.literal("hidden")),
   weight: v.number(),
   stdin: v.optional(v.string()),
@@ -22,6 +26,7 @@ const evaluationTest = v.object({
   failGuidance: v.optional(v.string()),
 });
 const versionFields = {
+  language: v.optional(v.union(v.literal("python"), v.literal("java"))),
   instructions: v.string(),
   runtimeVersion: v.string(),
   entrypoint: v.string(),
@@ -30,13 +35,14 @@ const versionFields = {
 };
 
 type VersionInput = {
+  language?: SupportedLanguage;
   instructions: string;
   runtimeVersion: string;
   entrypoint: string;
   starterFiles: { path: string; content: string }[];
   evaluationTests: {
     name: string;
-    kind: "input_output" | "python_harness";
+    kind: "input_output" | "python_harness" | "java_harness";
     visibility: "public" | "hidden";
     weight: number;
     stdin?: string;
@@ -59,18 +65,23 @@ function cleanOptional(value: string | undefined) {
 }
 
 function validateVersion(input: VersionInput) {
+  const language = input.language ?? "python";
   const instructions = cleanRequired(input.instructions, "Instructions");
   const entrypoint = validateFilePath(input.entrypoint);
-  requireMaintainedPythonRuntime(input.runtimeVersion);
+  requireMaintainedRuntime(language, input.runtimeVersion);
   if (input.starterFiles.length === 0) throw new ConvexError("Add at least one starter file");
 
   const paths = input.starterFiles.map(({ path }) => validateFilePath(path));
   if (new Set(paths).size !== paths.length)
     throw new ConvexError("Starter file paths must be unique");
   if (!paths.includes(entrypoint)) throw new ConvexError("The entrypoint must be a starter file");
-  if (!entrypoint.endsWith(".py")) throw new ConvexError("The Python entrypoint must end in .py");
-  input.evaluationTests.forEach(validateEvaluationTest);
-  return { instructions, entrypoint, paths };
+  const extension = language === "java" ? ".java" : ".py";
+  if (!entrypoint.endsWith(extension)) {
+    const name = language === "java" ? "Java" : "Python";
+    throw new ConvexError(`The ${name} entrypoint must end in ${extension}`);
+  }
+  input.evaluationTests.forEach((test) => validateEvaluationTest(test, language));
+  return { instructions, language, entrypoint, paths };
 }
 
 async function insertVersion(
@@ -79,14 +90,14 @@ async function insertVersion(
   createdBy: Id<"users">,
   input: VersionInput,
 ) {
-  const { entrypoint, instructions, paths } = validateVersion(input);
+  const { entrypoint, instructions, language, paths } = validateVersion(input);
   const version = assignment.latestVersion + 1;
   const assignmentVersionId = await ctx.db.insert("assignmentVersions", {
     organizationId: assignment.organizationId,
     assignmentId: assignment._id,
     version,
     instructions,
-    language: "python",
+    language,
     runtimeVersion: input.runtimeVersion,
     entrypoint,
     createdBy,
@@ -114,7 +125,7 @@ async function insertVersion(
         weight: test.weight,
         stdin: test.kind === "input_output" ? test.stdin : undefined,
         expectedOutput: test.kind === "input_output" ? test.expectedOutput : undefined,
-        harness: test.kind === "python_harness" ? test.harness?.trim() : undefined,
+        harness: test.kind === "input_output" ? undefined : test.harness?.trim(),
         passGuidance: cleanOptional(test.passGuidance),
         failGuidance: cleanOptional(test.failGuidance),
         order,
@@ -143,7 +154,15 @@ export const supportedRuntime = query({
   args: { courseId: v.id("courses") },
   handler: async (ctx, { courseId }) => {
     await requireCourseCollaborator(ctx, courseId);
-    return maintainedPythonRuntime;
+    return maintainedRuntimes[0];
+  },
+});
+
+export const supportedRuntimes = query({
+  args: { courseId: v.id("courses") },
+  handler: async (ctx, { courseId }) => {
+    await requireCourseCollaborator(ctx, courseId);
+    return maintainedRuntimes;
   },
 });
 

@@ -1,7 +1,8 @@
 export type ExecutionFile = { path: string; content: string };
+export type ExecutionLanguage = "python" | "java";
 
 export type ExecutionRequest = {
-  runtime: { language: "python"; version: string };
+  runtime: { language: ExecutionLanguage; version: string };
   entrypoint: string;
   files: ExecutionFile[];
   stdin?: string;

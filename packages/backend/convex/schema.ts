@@ -2,7 +2,12 @@ import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
 
 const role = v.union(v.literal("teacher"), v.literal("student"));
-const testKind = v.union(v.literal("input_output"), v.literal("python_harness"));
+const language = v.union(v.literal("python"), v.literal("java"));
+const testKind = v.union(
+  v.literal("input_output"),
+  v.literal("python_harness"),
+  v.literal("java_harness"),
+);
 const testVisibility = v.union(v.literal("public"), v.literal("hidden"));
 const releasePublicationState = v.union(
   v.literal("draft"),
@@ -82,7 +87,7 @@ export default defineSchema({
     assignmentId: v.id("assignments"),
     version: v.number(),
     instructions: v.string(),
-    language: v.literal("python"),
+    language,
     runtimeVersion: v.string(),
     entrypoint: v.string(),
     createdBy: v.id("users"),
@@ -308,6 +313,7 @@ export default defineSchema({
     assignmentReleaseId: v.id("assignmentReleases"),
     assignmentVersionId: v.id("assignmentVersions"),
     studentId: v.id("users"),
+    language: v.optional(language),
     runtimeVersion: v.string(),
     entrypoint: v.string(),
     files: v.array(v.object({ path: v.string(), content: v.string() })),
@@ -354,6 +360,7 @@ export default defineSchema({
     snapshotId: v.id("submissionSnapshots"),
     idempotencyKey: v.string(),
     attemptNumber: v.number(),
+    language: v.optional(language),
     runtimeVersion: v.string(),
     entrypoint: v.string(),
     execution: v.object({

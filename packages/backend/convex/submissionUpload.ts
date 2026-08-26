@@ -61,6 +61,7 @@ export const submit = action({
       sha256: contentHash,
     });
     const evaluated = await evaluateSubmission(executionServiceFromEnvironment(), {
+      language: prepared.language,
       runtimeVersion: prepared.runtimeVersion,
       entrypoint: prepared.entrypoint,
       files: prepared.files,
@@ -72,6 +73,7 @@ export const submit = action({
       studentId: prepared.studentId,
       assignmentReleaseId: prepared.assignmentReleaseId,
       assignmentVersionId: prepared.assignmentVersionId,
+      language: prepared.language,
       runtimeVersion: prepared.runtimeVersion,
       entrypoint: prepared.entrypoint,
       historySequence: prepared.requiredHistorySequence,

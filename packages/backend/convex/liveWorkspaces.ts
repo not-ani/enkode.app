@@ -145,6 +145,7 @@ export const watch = query({
       classroomName: classroom.name,
       studentDisplayName: student.displayName,
       studentUsername: student.username,
+      language: version.language,
       entrypoint: version.entrypoint,
       runtimeVersion: version.runtimeVersion,
     };

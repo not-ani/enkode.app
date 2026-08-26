@@ -11,6 +11,7 @@ type VersionOption = {
   assignmentTitle: string;
   assignmentVersionId: string;
   version: number;
+  language: "python" | "java";
   runtimeVersion: string;
 };
 type Release = {
@@ -167,8 +168,8 @@ export default function AssignmentReleases({ classrooms }: { classrooms: Classro
                   <option value="">Select a version</option>
                   {available?.map((version) => (
                     <option value={version.assignmentVersionId} key={version.assignmentVersionId}>
-                      {version.assignmentTitle} · Version {version.version} · Python{" "}
-                      {version.runtimeVersion}
+                      {version.assignmentTitle} · Version {version.version} ·{" "}
+                      {version.language === "java" ? "Java" : "Python"} {version.runtimeVersion}
                     </option>
                   ))}
                 </select>
@@ -341,6 +342,7 @@ export default function AssignmentReleases({ classrooms }: { classrooms: Classro
 
 type VersionPreview = {
   version: number;
+  language: "python" | "java";
   instructions: string;
   runtimeVersion: string;
   entrypoint: string;
@@ -401,7 +403,8 @@ function VersionAdoption({ release, versions }: { release: Release; versions: Ve
             <option value="">Choose a version to preview</option>
             {newer.map((version) => (
               <option value={version.assignmentVersionId} key={version.assignmentVersionId}>
-                Version {version.version} · Python {version.runtimeVersion}
+                Version {version.version} · {version.language === "java" ? "Java" : "Python"}{" "}
+                {version.runtimeVersion}
               </option>
             ))}
           </select>

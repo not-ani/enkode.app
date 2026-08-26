@@ -2,7 +2,7 @@ import { ConvexError } from "convex/values";
 
 type EvaluationTest = {
   name: string;
-  kind: "input_output" | "python_harness";
+  kind: "input_output" | "python_harness" | "java_harness";
   visibility: "public" | "hidden";
   weight: number;
   stdin?: string;
@@ -25,7 +25,7 @@ export function validateFilePath(path: string) {
   return cleaned;
 }
 
-export function validateEvaluationTest(test: EvaluationTest) {
+export function validateEvaluationTest(test: EvaluationTest, language: "python" | "java") {
   if (!test.name.trim()) throw new ConvexError("Evaluation Test name is required");
   if (!Number.isFinite(test.weight) || test.weight < 0) {
     throw new ConvexError("Evaluation Test weight must be zero or greater");
@@ -43,7 +43,10 @@ export function validateEvaluationTest(test: EvaluationTest) {
     test.stdin !== undefined ||
     test.expectedOutput !== undefined
   ) {
-    throw new ConvexError("Python harness tests require harness source only");
+    throw new ConvexError("Language-native harness tests require harness source only");
+  }
+  if (test.kind !== "input_output" && test.kind !== `${language}_harness`) {
+    throw new ConvexError(`Harness tests must match the ${language} Assignment language`);
   }
 }
 

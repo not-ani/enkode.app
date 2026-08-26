@@ -1,5 +1,10 @@
 import type { Doc } from "./_generated/dataModel";
-import type { ExecutionFile, ExecutionResult, ExecutionService } from "./execution";
+import type {
+  ExecutionFile,
+  ExecutionLanguage,
+  ExecutionResult,
+  ExecutionService,
+} from "./execution";
 
 type EvaluationTest = Doc<"evaluationTests">;
 
@@ -16,13 +21,14 @@ export async function evaluateRun(
   execution: ExecutionService,
   input: {
     runtimeVersion: string;
+    language: ExecutionLanguage;
     entrypoint: string;
     files: ExecutionFile[];
     publicTests: EvaluationTest[];
   },
 ) {
   const executionResult = await execution.execute({
-    runtime: { language: "python", version: input.runtimeVersion },
+    runtime: { language: input.language, version: input.runtimeVersion },
     entrypoint: input.entrypoint,
     files: input.files,
   });
@@ -44,12 +50,17 @@ export async function evaluateRun(
 /** Shared platform-owned test runner used by public Run and full Submission evaluation. */
 export async function evaluateTest(
   execution: ExecutionService,
-  input: { runtimeVersion: string; entrypoint: string; files: ExecutionFile[] },
+  input: {
+    language: ExecutionLanguage;
+    runtimeVersion: string;
+    entrypoint: string;
+    files: ExecutionFile[];
+  },
   test: EvaluationTest,
 ) {
   const request = (entrypoint: string, files: ExecutionFile[], stdin?: string) =>
     execution.execute({
-      runtime: { language: "python", version: input.runtimeVersion },
+      runtime: { language: input.language, version: input.runtimeVersion },
       entrypoint,
       files,
       stdin,
@@ -60,12 +71,17 @@ export async function evaluateTest(
     result = await request(input.entrypoint, input.files, test.stdin);
     passed = result.status === "completed" && result.stdout === test.expectedOutput;
   } else {
-    let harnessPath = `__enkode_${test.visibility}_test_${test.order}.py`;
-    while (input.files.some(({ path }) => path === harnessPath)) harnessPath = `_${harnessPath}`;
-    result = await request(harnessPath, [
-      { path: harnessPath, content: test.harness! },
-      ...input.files,
-    ]);
+    const extension = input.language === "java" ? "java" : "py";
+    let harnessName = `__enkode_${test.visibility}_test_${test.order}`;
+    while (input.files.some(({ path }) => path === `${harnessName}.${extension}`)) {
+      harnessName = `_${harnessName}`;
+    }
+    const harnessPath = `${harnessName}.${extension}`;
+    const harness =
+      input.language === "java"
+        ? `public class ${harnessName} {\n  public static void main(String[] args) throws Exception {\n${test.harness!}\n  }\n}\n`
+        : test.harness!;
+    result = await request(harnessPath, [{ path: harnessPath, content: harness }, ...input.files]);
     passed = result.status === "completed";
   }
   return { ...result, passed };

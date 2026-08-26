@@ -11,7 +11,7 @@ const webSocketUrlSchema = z.url().refine(
     const protocol = new URL(url).protocol;
     return protocol === "ws:" || protocol === "wss:";
   },
-  { message: "Use a ws:// or wss:// Enkode Python language-service endpoint" },
+  { message: "Use a ws:// or wss:// Enkode language-service endpoint" },
 );
 
 export const env = createEnv({
@@ -20,6 +20,7 @@ export const env = createEnv({
     VITE_CONVEX_URL: convexUrlSchema("example.convex.cloud"),
     VITE_CONVEX_SITE_URL: convexUrlSchema("example.convex.site"),
     VITE_PYRIGHT_LANGUAGE_SERVICE_URL: webSocketUrlSchema.optional(),
+    VITE_JDTLS_LANGUAGE_SERVICE_URL: webSocketUrlSchema.optional(),
   },
   runtimeEnv: (import.meta as any).env,
   emptyStringAsUndefined: true,

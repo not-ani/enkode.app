@@ -9,6 +9,8 @@ const mocks = vi.hoisted(() => ({
   connect: vi.fn(async () => undefined),
   disconnect: vi.fn(),
   languageUpdate: vi.fn(),
+  serviceConfiguration: vi.fn(),
+  languageState: { status: "ready" } as { status: "ready" } | { status: "failed"; message: string },
   prepareLanguageAdapter: vi.fn(() => ({ dispose: vi.fn() })),
   recorderStart: vi.fn(),
   recorderChange: vi.fn(),
@@ -28,7 +30,10 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@enkode.app/env/web", () => ({
-  env: { VITE_PYRIGHT_LANGUAGE_SERVICE_URL: "wss://languages.example.test/python" },
+  env: {
+    VITE_PYRIGHT_LANGUAGE_SERVICE_URL: "wss://languages.example.test/python",
+    VITE_JDTLS_LANGUAGE_SERVICE_URL: "wss://languages.example.test/java",
+  },
 }));
 
 vi.mock("./workspace-monaco", () => ({
@@ -38,19 +43,22 @@ vi.mock("./workspace-monaco", () => ({
   },
 }));
 
-vi.mock("@/lib/python-language-service", () => ({
-  RemotePythonLanguageService: class {
+vi.mock("@/lib/remote-language-service", () => ({
+  RemoteLanguageService: class {
+    constructor(...configuration: unknown[]) {
+      mocks.serviceConfiguration(...configuration);
+    }
     connect = mocks.connect;
     disconnect = mocks.disconnect;
     updateFile = mocks.languageUpdate;
     reconnect = vi.fn(async () => undefined);
-    getState = () => ({ status: "ready" });
+    getState = () => mocks.languageState;
     subscribeState = () => () => undefined;
   },
 }));
 
-vi.mock("@/lib/python-monaco-adapter", () => ({
-  registerPythonMonacoAdapter: mocks.prepareLanguageAdapter,
+vi.mock("@/lib/remote-monaco-adapter", () => ({
+  registerRemoteMonacoAdapter: mocks.prepareLanguageAdapter,
 }));
 
 vi.mock("@/lib/work-history", () => ({
@@ -79,6 +87,7 @@ describe("Workspace editor integration", () => {
     localStorage.clear();
     vi.clearAllMocks();
     mocks.monacoProps = undefined;
+    mocks.languageState = { status: "ready" };
   });
 
   it("keeps editing, Work History, and Python intelligence on independent hooks", async () => {
@@ -101,6 +110,7 @@ describe("Workspace editor integration", () => {
         assignmentReleaseId="release-1"
         workspaceId="workspace-1"
         files={[{ path: "main.py", content: "print('before')\n" }]}
+        language="python"
         entrypoint="main.py"
         runtimeVersion="3.12.0"
         onSave={vi.fn(async () => undefined)}
@@ -183,6 +193,7 @@ describe("Workspace editor integration", () => {
         assignmentReleaseId="release-1"
         workspaceId="workspace-1"
         files={[{ path: "main.py", content: "print('student')\n" }]}
+        language="python"
         entrypoint="main.py"
         runtimeVersion="3.12.0"
         onSave={vi.fn(async () => undefined)}
@@ -247,5 +258,41 @@ describe("Workspace editor integration", () => {
       ],
       2,
     );
+  });
+
+  it("keeps Java editing and Work History available while JDT LS is degraded", async () => {
+    mocks.languageState = { status: "failed", message: "JDT LS unavailable" };
+    render(
+      <WorkspaceEditor
+        assignmentReleaseId="release-java"
+        workspaceId="workspace-java"
+        files={[{ path: "Main.java", content: "public class Main {}\n" }]}
+        language="java"
+        entrypoint="Main.java"
+        runtimeVersion="15.0.2"
+        onSave={vi.fn(async () => undefined)}
+        onUploadHistory={vi.fn(async () => ({ acknowledgedThrough: 1 }))}
+        onRun={vi.fn()}
+        submissions={[]}
+        onSubmit={vi.fn()}
+        onCompleteVersionMerge={vi.fn(async () => undefined)}
+      />,
+    );
+
+    await screen.findByText("Java intelligence unavailable");
+    await waitFor(() => expect(mocks.recorderStart).toHaveBeenCalledOnce());
+    expect(mocks.serviceConfiguration).toHaveBeenCalledWith(
+      "java",
+      "jdtls",
+      "wss://languages.example.test/java",
+      expect.anything(),
+    );
+
+    await act(() => mocks.monacoProps!.onChange("public class Main { int answer = 42; }\n"));
+    expect(mocks.languageUpdate).toHaveBeenCalledWith(
+      "Main.java",
+      "public class Main { int answer = 42; }\n",
+    );
+    expect(screen.getByText("Unsaved")).toBeDefined();
   });
 });
