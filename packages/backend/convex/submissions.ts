@@ -6,6 +6,7 @@ import { internalMutation, internalQuery, query } from "./_generated/server";
 import { requireClassroomTeacher, requireRole } from "./authorization";
 import { effectiveDeadline, submissionEligibility } from "./deadlinePolicy";
 import { requireWritableAssignmentRelease } from "./lifecycleGuards";
+import { notifySubmissionNeedsReview } from "./notificationEvents";
 import { releasePublicationStatus } from "./releasePolicy";
 
 const workspaceFile = v.object({ path: v.string(), content: v.string() });
@@ -263,6 +264,8 @@ export const record = internalMutation({
       effectiveDeadlineAt: deadline.deadlineAt,
       submittedAt: now,
     });
+    const submission = await ctx.db.get(submissionId);
+    if (submission) await notifySubmissionNeedsReview(ctx, submission);
     await ctx.scheduler.runAfter(0, internal.submissionSimilarity.compare, { submissionId });
     return studentVisible((await ctx.db.get(submissionId))!);
   },

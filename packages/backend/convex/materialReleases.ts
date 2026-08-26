@@ -12,6 +12,7 @@ import {
   requireWritableMaterial,
   requireWritableMaterialRelease,
 } from "./lifecycleGuards";
+import { notifyMaterialAvailable, notifyMaterialChanged } from "./notificationEvents";
 import { adjacentOrder, releasePublicationStatus, validateScheduledFor } from "./releasePolicy";
 
 const publication = v.union(
@@ -198,6 +199,7 @@ export const create = mutation({
         scheduledFor,
       });
     }
+    if (publicationState === "published") await notifyMaterialAvailable(ctx, release);
     return materialReleaseId;
   },
 });
@@ -225,6 +227,9 @@ export const adoptVersion = mutation({
     }
     await ctx.db.patch(release._id, { materialVersionId });
     await auditRelease(ctx, release, user._id, "material_release.version_adopted");
+    if (releasePublicationStatus(release) === "published") {
+      await notifyMaterialChanged(ctx, release, materialVersionId);
+    }
   },
 });
 
@@ -289,6 +294,7 @@ export const publishNow = mutation({
       publishedAt: Date.now(),
     });
     await auditRelease(ctx, release, user._id, "material_release.published");
+    await notifyMaterialAvailable(ctx, release);
   },
 });
 
@@ -322,6 +328,7 @@ export const publishScheduled = internalMutation({
       release.scheduledBy ?? release.createdBy,
       "material_release.published",
     );
+    await notifyMaterialAvailable(ctx, release);
   },
 });
 
@@ -421,8 +428,15 @@ export const open = query({
     )
       throw new ConvexError("Forbidden");
     await requireActiveEnrollment(ctx, release.classroomId, user._id);
-    const version = await ctx.db.get(release.materialVersionId);
+    const [version, classroom] = await Promise.all([
+      ctx.db.get(release.materialVersionId),
+      ctx.db.get(release.classroomId),
+    ]);
     if (!version) throw new ConvexError("Material Release content is unavailable");
-    return { ...(await releaseSummary(ctx, release)), ...(await contentSummary(ctx, version)) };
+    return {
+      ...(await releaseSummary(ctx, release)),
+      ...(await contentSummary(ctx, version)),
+      classroomName: classroom?.name,
+    };
   },
 });
