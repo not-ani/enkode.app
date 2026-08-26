@@ -36,6 +36,14 @@ const integritySignalState = v.union(
   v.literal("reviewed"),
   v.literal("dismissed"),
 );
+const notificationType = v.union(
+  v.literal("assignment_available"),
+  v.literal("assignment_changed"),
+  v.literal("material_available"),
+  v.literal("material_changed"),
+  v.literal("grade_returned"),
+  v.literal("submission_needs_review"),
+);
 const inlineFeedback = v.object({
   path: v.string(),
   snapshotFileContentHash: v.string(),
@@ -491,6 +499,25 @@ export default defineSchema({
   })
     .index("by_grade_revision", ["gradeId", "revision"])
     .index("by_release_student_revision", ["assignmentReleaseId", "studentId", "revision"]),
+
+  notifications: defineTable({
+    organizationId: v.id("organizations"),
+    recipientId: v.id("users"),
+    classroomId: v.id("classrooms"),
+    type: notificationType,
+    dedupeKey: v.string(),
+    title: v.string(),
+    body: v.string(),
+    assignmentReleaseId: v.optional(v.id("assignmentReleases")),
+    materialReleaseId: v.optional(v.id("materialReleases")),
+    gradeReturnId: v.optional(v.id("gradeReturns")),
+    submissionId: v.optional(v.id("submissions")),
+    studentId: v.optional(v.id("users")),
+    createdAt: v.number(),
+    readAt: v.optional(v.number()),
+  })
+    .index("by_recipient_created", ["recipientId", "createdAt"])
+    .index("by_recipient_dedupe", ["recipientId", "dedupeKey"]),
 
   auditEvents: defineTable({
     organizationId: v.id("organizations"),

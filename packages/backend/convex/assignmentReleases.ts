@@ -21,6 +21,7 @@ import {
   requireWritableAssignmentRelease,
   requireWritableClassroom,
 } from "./lifecycleGuards";
+import { notifyAssignmentAvailable, notifyAssignmentChanged } from "./notificationEvents";
 import {
   adjacentOrder,
   releasePublicationStatus,
@@ -284,6 +285,10 @@ export const create = mutation({
         scheduledFor,
       });
     }
+    if (publicationState === "published") {
+      const release = await ctx.db.get(releaseId);
+      if (release) await notifyAssignmentAvailable(ctx, release);
+    }
     return releaseId;
   },
 });
@@ -476,6 +481,7 @@ export const publishNow = mutation({
       publishedAt: Date.now(),
     });
     await auditRelease(ctx, release, user._id, "assignment_release.published");
+    await notifyAssignmentAvailable(ctx, release);
   },
 });
 
@@ -513,6 +519,7 @@ export const publishScheduled = internalMutation({
       release.scheduledBy ?? release.createdBy,
       "assignment_release.published",
     );
+    await notifyAssignmentAvailable(ctx, release);
   },
 });
 
@@ -605,6 +612,9 @@ export const adoptVersion = mutation({
 
     await ctx.db.patch(release._id, { assignmentVersionId: target._id });
     await auditRelease(ctx, release, user._id, "assignment_release.version_adopted");
+    if (releasePublicationStatus(release) === "published") {
+      await notifyAssignmentChanged(ctx, release, target._id);
+    }
     return { adoptionId, workspacesAwaitingMerge };
   },
 });

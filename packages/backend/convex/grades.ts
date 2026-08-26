@@ -7,6 +7,7 @@ import { appendAuditEvent } from "./audit";
 import { requireClassroomTeacher, requireRole } from "./authorization";
 import { deriveAssignmentStatus, validateGradePoints, validateInlineFeedback } from "./gradePolicy";
 import { requireWritableAssignmentRelease } from "./lifecycleGuards";
+import { notifyGradeReturned } from "./notificationEvents";
 
 const inlineFeedbackInput = v.object({
   path: v.string(),
@@ -271,6 +272,8 @@ export const returnGrade = mutation({
       action: revision === 1 ? "grade.returned" : "grade.revised_returned",
       target: { kind: "grade_return", id: gradeReturnId },
     });
+    const gradeReturn = await ctx.db.get(gradeReturnId);
+    if (gradeReturn) await notifyGradeReturned(ctx, gradeReturn);
     return gradeReturnId;
   },
 });
