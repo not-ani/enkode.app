@@ -1,6 +1,7 @@
 import { api } from "@enkode.app/backend/convex/_generated/api";
 import { Button } from "@enkode.app/ui/components/button";
 import { Input } from "@enkode.app/ui/components/input";
+import { Link } from "@tanstack/react-router";
 import { useMutation, useQuery } from "convex/react";
 import { useState, type FormEvent } from "react";
 
@@ -195,19 +196,9 @@ export default function AssignmentReleases({ classrooms }: { classrooms: Classro
 }
 
 type StudentRelease = Release & { classroomName: string; runtimeVersion: string };
-type OpenRelease = StudentRelease & {
-  instructions: string;
-  entrypoint: string;
-  starterFiles: { _id: string; path: string }[];
-};
 
 export function StudentAssignmentReleases() {
   const releases = useQuery(api.assignmentReleases.listMine) as StudentRelease[] | undefined;
-  const [openId, setOpenId] = useState<string>();
-  const opened = useQuery(
-    api.assignmentReleases.open,
-    openId ? { assignmentReleaseId: openId } : "skip",
-  ) as OpenRelease | undefined;
 
   return (
     <section className="mt-8 flex max-w-2xl flex-col gap-3">
@@ -222,27 +213,16 @@ export function StudentAssignmentReleases() {
         <ul className="divide-y divide-foreground/10 border-y border-foreground/10">
           {releases.map((release) => (
             <li className="py-4" key={release._id}>
-              <button
-                type="button"
-                className="w-full text-left"
-                onClick={() => setOpenId(openId === release._id ? undefined : release._id)}
+              <Link
+                to="/assignment-releases/$assignmentReleaseId"
+                params={{ assignmentReleaseId: release._id }}
+                className="block w-full text-left hover:text-primary"
               >
                 <span className="block font-medium">{release.assignmentTitle}</span>
                 <span className="text-muted-foreground block text-base sm:text-sm">
                   {release.classroomName} · {release.points} points · Version {release.version}
                 </span>
-              </button>
-              {openId === release._id && opened?._id === release._id ? (
-                <div className="bg-muted/50 mt-3 flex flex-col gap-2 p-4 text-base sm:text-sm">
-                  <p className="whitespace-pre-wrap">{opened.instructions}</p>
-                  <p className="text-muted-foreground">
-                    Python {opened.runtimeVersion} · Entrypoint {opened.entrypoint}
-                  </p>
-                  <p className="text-muted-foreground">
-                    Starter files: {opened.starterFiles.map(({ path }) => path).join(", ")}
-                  </p>
-                </div>
-              ) : null}
+              </Link>
             </li>
           ))}
         </ul>

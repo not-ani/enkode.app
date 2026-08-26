@@ -127,6 +127,18 @@ export default defineSchema({
     .index("by_classroom", ["classroomId", "order"])
     .index("by_classroom_assignment", ["classroomId", "assignmentId"]),
 
+  workspaces: defineTable({
+    organizationId: v.id("organizations"),
+    assignmentReleaseId: v.id("assignmentReleases"),
+    assignmentVersionId: v.id("assignmentVersions"),
+    studentId: v.id("users"),
+    files: v.array(v.object({ path: v.string(), content: v.string() })),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_release_student", ["assignmentReleaseId", "studentId"])
+    .index("by_student", ["studentId"]),
+
   auditEvents: defineTable({
     organizationId: v.id("organizations"),
     actorKind: v.union(v.literal("developer"), v.literal("user")),
