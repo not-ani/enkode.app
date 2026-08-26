@@ -4,6 +4,7 @@ import { useAction, useMutation, useQuery } from "convex/react";
 import { useCallback, useEffect, useState } from "react";
 
 import WorkspaceEditor from "@/components/workspace-editor";
+import { WorkspaceViewers } from "@/components/live-workspace-viewer";
 import type { WorkspaceFile } from "@/lib/workspace-state";
 import type { WorkHistoryChunk } from "@/lib/work-history";
 
@@ -96,6 +97,7 @@ function AssignmentWorkspaceRoute() {
             {release.instructions}
           </p>
         </details>
+        <WorkspaceViewers workspaceId={workspace._id} />
         <WorkspaceEditor
           assignmentReleaseId={assignmentReleaseId}
           workspaceId={workspace._id}

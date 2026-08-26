@@ -220,6 +220,17 @@ export default defineSchema({
     .index("by_workspace_sequence", ["workspaceId", "startSequence"])
     .index("by_workspace_hash", ["workspaceId", "contentHash"]),
 
+  workspaceViewerPresences: defineTable({
+    organizationId: v.id("organizations"),
+    workspaceId: v.id("workspaces"),
+    teacherId: v.id("users"),
+    sessionId: v.string(),
+    expiresAt: v.number(),
+  })
+    .index("by_workspace", ["workspaceId"])
+    .index("by_workspace_session", ["workspaceId", "sessionId"])
+    .index("by_teacher", ["teacherId"]),
+
   auditEvents: defineTable({
     organizationId: v.id("organizations"),
     actorKind: v.union(v.literal("developer"), v.literal("user")),
