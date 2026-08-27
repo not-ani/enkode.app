@@ -1,4 +1,4 @@
-import { api } from "@enkode.app/backend/convex/_generated/api";
+import { api } from "@/lib/convex-api";
 import { Button } from "@enkode.app/ui/components/button";
 import { Input } from "@enkode.app/ui/components/input";
 import { Label } from "@enkode.app/ui/components/label";
@@ -29,7 +29,7 @@ export default function StudentManagement() {
       setStudent(emptyStudent);
       toast.success("Student provisioned");
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Could not provision Student");
+      toast.error(messageFrom(error, "Could not provision Student"));
     } finally {
       setIsSaving(false);
     }
@@ -44,7 +44,7 @@ export default function StudentManagement() {
       setReset({ password: "" });
       toast.success("Student password reset");
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Could not reset password");
+      toast.error(messageFrom(error, "Could not reset password"));
     } finally {
       setIsSaving(false);
     }

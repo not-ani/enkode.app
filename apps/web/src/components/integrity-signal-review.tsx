@@ -2,6 +2,10 @@ import { Button } from "@enkode.app/ui/components/button";
 import { Textarea } from "@enkode.app/ui/components/textarea";
 import { useState } from "react";
 
+import { messageFrom } from "@/lib/error-message";
+
+import type { ReplayEvent } from "./work-history-replay";
+
 export type IntegritySignal = {
   _id: string;
   type: "large_paste" | "unattributed_bulk_change" | "work_history_gap" | "similarity";
@@ -18,13 +22,7 @@ export type IntegritySignal = {
 };
 
 type Evidence = {
-  event?: {
-    sequence: number;
-    type: "workspace_state" | "file_change";
-    path?: string;
-    origin?: string;
-    changes?: { rangeOffset: number; rangeLength: number; text: string }[];
-  };
+  event?: ReplayEvent;
   similarity?: {
     students: { id: string; displayName: string; username: string }[];
     matchedSpans: {
@@ -72,7 +70,7 @@ export default function IntegritySignalReview({
       const result = await inspect(signalId);
       setEvidence((current) => ({ ...current, [signalId]: result }));
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not inspect evidence");
+      setError(messageFrom(caught, "Could not inspect evidence"));
     } finally {
       setBusy(undefined);
     }
@@ -84,7 +82,7 @@ export default function IntegritySignalReview({
     try {
       await review(signalId, state, notes[signalId]);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not update review");
+      setError(messageFrom(caught, "Could not update review"));
     } finally {
       setBusy(undefined);
     }
@@ -130,14 +128,23 @@ export default function IntegritySignalReview({
                 ) : null}
                 {inspected?.event ? (
                   <div className="border-l-2 border-foreground/20 pl-3 text-sm">
-                    <p>
-                      Event {inspected.event.sequence}: {inspected.event.path} · Edit Origin{" "}
-                      {inspected.event.origin}
-                    </p>
-                    <p className="text-muted-foreground">
-                      {inspected.event.changes?.length ?? 0} exact model change
-                      {(inspected.event.changes?.length ?? 0) === 1 ? "" : "s"}
-                    </p>
+                    {inspected.event.type === "file_change" ? (
+                      <>
+                        <p>
+                          Event {inspected.event.sequence}: {inspected.event.path} · Edit Origin{" "}
+                          {inspected.event.origin}
+                        </p>
+                        <p className="text-muted-foreground">
+                          {inspected.event.changes.length} exact model change
+                          {inspected.event.changes.length === 1 ? "" : "s"}
+                        </p>
+                      </>
+                    ) : (
+                      <p>
+                        Event {inspected.event.sequence}:{" "}
+                        {inspected.event.type.replaceAll("_", " ")}
+                      </p>
+                    )}
                   </div>
                 ) : null}
                 {inspected?.similarity ? (

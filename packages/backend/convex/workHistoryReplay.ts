@@ -5,7 +5,7 @@ import type { QueryCtx } from "./_generated/server";
 import { internalQuery, query } from "./_generated/server";
 import { requireAuthenticatedUser } from "./authorization";
 
-async function requireHistoryReader(ctx: QueryCtx, workspaceId: Id<"workspaces">) {
+export async function requireHistoryReader(ctx: QueryCtx, workspaceId: Id<"workspaces">) {
   const authenticated = await requireAuthenticatedUser(ctx);
   const workspace = await ctx.db.get(workspaceId);
   if (!workspace || workspace.organizationId !== authenticated.organization._id) {

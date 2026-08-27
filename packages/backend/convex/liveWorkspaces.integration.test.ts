@@ -129,7 +129,7 @@ describe("live Workspace viewing", () => {
 
     expect(
       await student.query(api.liveWorkspaces.listViewers, { workspaceId: workspace._id }),
-    ).toEqual([{ teacherId, displayName: "Ada Teacher" }]);
+    ).toEqual([{ teacherId, displayName: "Ada Teacher", viewKind: "workspace" }]);
     await expect(
       backend
         .withIdentity({ subject: "auth-other-student" })
@@ -234,6 +234,41 @@ describe("live Workspace viewing", () => {
     expect(
       await backend.run(async (ctx) => await ctx.db.query("workspaceViewerPresences").collect()),
     ).toEqual([]);
+  });
+
+  it("tracks Teacher Work History presence with heartbeat, leave, and Audit Event", async () => {
+    const backend = createTestBackend();
+    const { student, teacher, teacherId, workspace } = await seed(backend);
+
+    await teacher.mutation(api.liveWorkspaces.enter, {
+      workspaceId: workspace._id,
+      sessionId: "history-tab",
+      viewKind: "work_history",
+    });
+    expect(
+      await student.query(api.liveWorkspaces.listViewers, { workspaceId: workspace._id }),
+    ).toEqual([{ teacherId, displayName: "Ada Teacher", viewKind: "work_history" }]);
+    await teacher.mutation(api.liveWorkspaces.heartbeat, {
+      workspaceId: workspace._id,
+      sessionId: "history-tab",
+      viewKind: "work_history",
+    });
+    await teacher.mutation(api.liveWorkspaces.leave, {
+      workspaceId: workspace._id,
+      sessionId: "history-tab",
+    });
+    expect(
+      await student.query(api.liveWorkspaces.listViewers, { workspaceId: workspace._id }),
+    ).toEqual([]);
+    const events = await backend.run(async (ctx) =>
+      ctx.db
+        .query("auditEvents")
+        .withIndex("by_target", (index) =>
+          index.eq("targetKind", "workspace").eq("targetId", workspace._id),
+        )
+        .collect(),
+    );
+    expect(events.map(({ action }) => action)).toContain("workspace.work_history_view_opened");
   });
 
   it("keeps a heartbeating viewer when an older expiry job runs", async () => {

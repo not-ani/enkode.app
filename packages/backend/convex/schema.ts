@@ -104,6 +104,20 @@ export default defineSchema({
     .index("by_course", ["courseId"])
     .index("by_organization", ["organizationId"]),
 
+  courseLibraryItems: defineTable({
+    organizationId: v.id("organizations"),
+    courseId: v.id("courses"),
+    kind: v.union(v.literal("assignment"), v.literal("material")),
+    assignmentId: v.optional(v.id("assignments")),
+    materialId: v.optional(v.id("materials")),
+    order: v.number(),
+    createdAt: v.number(),
+  })
+    .index("by_organization", ["organizationId"])
+    .index("by_course", ["courseId", "order"])
+    .index("by_assignment", ["assignmentId"])
+    .index("by_material", ["materialId"]),
+
   assignmentVersions: defineTable({
     organizationId: v.id("organizations"),
     assignmentId: v.id("assignments"),
@@ -159,6 +173,7 @@ export default defineSchema({
 
   materialAttachments: defineTable({
     organizationId: v.id("organizations"),
+    courseId: v.id("courses"),
     storageProvider: v.string(),
     storageBucket: v.string(),
     storageKey: v.string(),
@@ -358,6 +373,7 @@ export default defineSchema({
     workspaceId: v.id("workspaces"),
     teacherId: v.id("users"),
     sessionId: v.string(),
+    viewKind: v.optional(v.union(v.literal("workspace"), v.literal("work_history"))),
     expiresAt: v.number(),
   })
     .index("by_workspace", ["workspaceId"])
@@ -514,6 +530,19 @@ export default defineSchema({
     .index("by_organization", ["organizationId"])
     .index("by_release_student", ["assignmentReleaseId", "studentId"])
     .index("by_submission", ["submissionId"]),
+
+  assignmentExcuses: defineTable({
+    organizationId: v.id("organizations"),
+    assignmentReleaseId: v.id("assignmentReleases"),
+    studentId: v.id("users"),
+    reason: v.optional(v.string()),
+    setBy: v.id("users"),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_organization", ["organizationId"])
+    .index("by_release", ["assignmentReleaseId"])
+    .index("by_release_student", ["assignmentReleaseId", "studentId"]),
 
   gradeReturns: defineTable({
     organizationId: v.id("organizations"),

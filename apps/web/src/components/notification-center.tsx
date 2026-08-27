@@ -1,4 +1,4 @@
-import { api } from "@enkode.app/backend/convex/_generated/api";
+import { api } from "@/lib/convex-api";
 import { Bell } from "lucide-react";
 import { useMutation, useQuery } from "convex/react";
 
@@ -19,7 +19,7 @@ type Notification = {
 };
 
 export default function NotificationCenter() {
-  const notifications = useQuery(api.notifications.listMine) as Notification[] | undefined;
+  const notifications = useQuery(api.notifications.listMine);
   const markRead = useMutation(api.notifications.markRead);
   const unreadCount = notifications?.filter(({ readAt }) => readAt === undefined).length ?? 0;
 

@@ -312,6 +312,7 @@ async function seed(test: ReturnType<typeof backend>) {
     });
     const attachmentId = await ctx.db.insert("materialAttachments", {
       organizationId,
+      courseId,
       storageProvider: "fake",
       storageBucket: "memory",
       storageKey: attachment.key,

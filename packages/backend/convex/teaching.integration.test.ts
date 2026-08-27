@@ -60,6 +60,56 @@ async function seedUsers(backend: ReturnType<typeof createTestBackend>) {
 }
 
 describe("Course and Classroom teaching assignments", () => {
+  it("keeps Assignments and Materials in one reorderable Course library", async () => {
+    const backend = createTestBackend();
+    await seedUsers(backend);
+    const ada = backend.withIdentity({ subject: "auth-ada" });
+    const courseId = await ada.mutation(api.courses.create, { name: "CS101" });
+    const assignment = await ada.mutation(api.assignments.create, {
+      courseId,
+      title: "Variables",
+      instructions: "Declare a variable.",
+      runtimeVersion: "3.12.0",
+      entrypoint: "main.py",
+      starterFiles: [{ path: "main.py", content: "" }],
+      evaluationTests: [],
+    });
+    await ada.mutation(api.materials.create, {
+      courseId,
+      title: "Reference sheet",
+      content: { kind: "rich_text", richText: "Variable syntax" },
+    });
+
+    const initial = await ada.query(api.courses.library, { courseId });
+    expect(
+      initial.map(({ kind, title }: { kind: string; title: string }) => [kind, title]),
+    ).toEqual([
+      ["assignment", "Variables"],
+      ["material", "Reference sheet"],
+    ]);
+    await ada.mutation(api.courses.moveLibraryItem, {
+      courseId,
+      itemId: initial[1]!.id,
+      direction: "up",
+    });
+    expect(
+      (await ada.query(api.courses.library, { courseId })).map(
+        ({ kind }: { kind: string }) => kind,
+      ),
+    ).toEqual(["material", "assignment"]);
+
+    const events = await backend.run(async (ctx) =>
+      ctx.db
+        .query("auditEvents")
+        .withIndex("by_target", (index) =>
+          index.eq("targetKind", "course").eq("targetId", courseId),
+        )
+        .collect(),
+    );
+    expect(events.map(({ action }) => action)).toContain("course.library_reordered");
+    expect(assignment.assignmentId).toBeTruthy();
+  });
+
   it("keeps Course Collaborator and Classroom Teacher access independent", async () => {
     const backend = createTestBackend();
     const { graceId, linusId } = await seedUsers(backend);

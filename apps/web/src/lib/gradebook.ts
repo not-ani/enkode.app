@@ -23,6 +23,7 @@ export type GradebookData = {
     cells: {
       assignmentReleaseId: string;
       points?: number;
+      excuseReason?: string;
       status: AssignmentStatus;
       deadlineFacts: { missing: boolean; late: boolean };
     }[];

@@ -1,26 +1,29 @@
 import type * as Monaco from "monaco-editor/editor/editor.api";
 
 import type {
+  LanguageCompletion,
+  LanguageCompletionRequest,
+  LanguageDiagnostic,
   LanguageIntelligenceState,
-  RemoteLanguage,
-  RemoteLanguageServiceContract,
 } from "./remote-language-service";
 import { registerRemoteMonacoAdapter } from "./remote-monaco-adapter";
 
 export type WorkspaceLanguage = "python" | "javascript" | "typescript" | "java";
 
-export type WorkspaceLanguageService = {
-  getState: () => LanguageIntelligenceState;
-  subscribeState: (listener: (state: LanguageIntelligenceState) => void) => () => void;
-  connect: (configuration: {
+export interface WorkspaceLanguageService {
+  getState(): LanguageIntelligenceState;
+  subscribeState(listener: (state: LanguageIntelligenceState) => void): () => void;
+  subscribeDiagnostics(listener: (diagnostics: LanguageDiagnostic[]) => void): () => void;
+  connect(configuration: {
     workspaceId: string;
     runtime: { language: WorkspaceLanguage; version: string };
     files: { path: string; content: string }[];
-  }) => Promise<void>;
-  reconnect: () => Promise<void>;
-  updateFile: (path: string, content: string) => void;
-  disconnect: () => void;
-};
+  }): Promise<void>;
+  reconnect(): Promise<void>;
+  updateFile(path: string, content: string): void;
+  complete(request: LanguageCompletionRequest): Promise<LanguageCompletion[]>;
+  disconnect(): void;
+}
 
 /** Browser-local intelligence lifecycle behind the same Workspace-facing contract as remote LSPs. */
 export class BrowserLocalLanguageService implements WorkspaceLanguageService {
@@ -39,7 +42,15 @@ export class BrowserLocalLanguageService implements WorkspaceLanguageService {
     return () => this.listeners.delete(listener);
   }
 
-  async connect() {
+  subscribeDiagnostics(_listener: (diagnostics: LanguageDiagnostic[]) => void) {
+    return () => undefined;
+  }
+
+  async connect(_configuration: {
+    workspaceId: string;
+    runtime: { language: WorkspaceLanguage; version: string };
+    files: { path: string; content: string }[];
+  }) {
     this.setReady();
   }
 
@@ -47,7 +58,11 @@ export class BrowserLocalLanguageService implements WorkspaceLanguageService {
     this.setReady();
   }
 
-  updateFile() {}
+  updateFile(_path: string, _content: string) {}
+
+  async complete(_request: LanguageCompletionRequest) {
+    return [];
+  }
 
   disconnect() {}
 
@@ -66,15 +81,20 @@ export function registerEnkodeMonacoLanguageAdapter(
   },
 ) {
   if (input.language === "python" || input.language === "java") {
-    return registerRemoteMonacoAdapter(
-      monaco,
-      input.service as unknown as RemoteLanguageServiceContract<RemoteLanguage>,
-      input.workspaceId,
-      input.language,
-    );
+    return registerRemoteMonacoAdapter(monaco, input.service, input.workspaceId, input.language);
   }
 
-  const typescript = (monaco as unknown as typeof import("monaco-editor")).languages.typescript;
+  const typescript = (
+    monaco.languages as unknown as {
+      typescript: {
+        typescriptDefaults: TypeScriptDefaults;
+        javascriptDefaults: TypeScriptDefaults;
+        ModuleKind: { ESNext: number };
+        ModuleResolutionKind: { NodeJs: number };
+        ScriptTarget: { ES2022: number };
+      };
+    }
+  ).typescript;
   const defaults =
     input.language === "typescript" ? typescript.typescriptDefaults : typescript.javascriptDefaults;
   defaults.setEagerModelSync(true);
@@ -90,6 +110,22 @@ export function registerEnkodeMonacoLanguageAdapter(
 
   return { dispose() {} };
 }
+
+type TypeScriptDefaults = {
+  setEagerModelSync(value: boolean): void;
+  setDiagnosticsOptions(options: {
+    noSemanticValidation: boolean;
+    noSyntaxValidation: boolean;
+  }): void;
+  setCompilerOptions(options: {
+    allowNonTsExtensions: boolean;
+    allowJs: boolean;
+    checkJs: boolean;
+    module: number;
+    moduleResolution: number;
+    target: number;
+  }): void;
+};
 
 export function languageLabel(language: WorkspaceLanguage) {
   return { python: "Python", javascript: "JavaScript", typescript: "TypeScript", java: "Java" }[

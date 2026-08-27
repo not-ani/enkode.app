@@ -6,8 +6,10 @@ import { internalMutation, mutation, query } from "./_generated/server";
 import { appendAuditEvent } from "./audit";
 import { requireClassroomTeacher, requireRole } from "./authorization";
 import { requireWritableAssignmentRelease } from "./lifecycleGuards";
+import { requireHistoryReader } from "./workHistoryReplay";
 
 export const VIEWER_PRESENCE_TTL_MS = 45_000;
+const viewKind = v.union(v.literal("workspace"), v.literal("work_history"));
 
 async function requireActiveWorkspaceStudent(
   ctx: Parameters<typeof requireClassroomTeacher>[0],
@@ -126,7 +128,12 @@ export const watch = query({
         index.eq("workspaceId", workspaceId).eq("sessionId", sessionId),
       )
       .unique();
-    if (!presence || presence.teacherId !== user._id || presence.expiresAt <= Date.now()) {
+    if (
+      !presence ||
+      presence.teacherId !== user._id ||
+      (presence.viewKind ?? "workspace") !== "workspace" ||
+      presence.expiresAt <= Date.now()
+    ) {
       throw new ConvexError("Viewer session ended");
     }
     const [assignment, classroom, version] = await Promise.all([
@@ -153,9 +160,17 @@ export const watch = query({
 });
 
 export const enter = mutation({
-  args: { workspaceId: v.id("workspaces"), sessionId: v.string() },
-  handler: async (ctx, { workspaceId, sessionId: rawSessionId }) => {
-    const { organization, user } = await requireTeacherWorkspace(ctx, workspaceId);
+  args: {
+    workspaceId: v.id("workspaces"),
+    sessionId: v.string(),
+    viewKind: v.optional(viewKind),
+  },
+  handler: async (ctx, { workspaceId, sessionId: rawSessionId, viewKind = "workspace" }) => {
+    const { organization, user } =
+      viewKind === "work_history"
+        ? await requireHistoryReader(ctx, workspaceId)
+        : await requireTeacherWorkspace(ctx, workspaceId);
+    if (user.role !== "teacher") throw new ConvexError("Forbidden");
     const sessionId = cleanSessionId(rawSessionId);
     const existing = await ctx.db
       .query("workspaceViewerPresences")
@@ -172,15 +187,19 @@ export const enter = mutation({
           workspaceId,
           teacherId: user._id,
           sessionId,
+          viewKind,
           expiresAt,
         });
     if (existing) {
-      await ctx.db.patch(existing._id, { expiresAt });
+      await ctx.db.patch(existing._id, { expiresAt, viewKind });
     } else {
       await appendAuditEvent(ctx, {
         organizationId: organization._id,
         actor: { kind: "user", userId: user._id },
-        action: "workspace.live_view_opened",
+        action:
+          viewKind === "work_history"
+            ? "workspace.work_history_view_opened"
+            : "workspace.live_view_opened",
         target: { kind: "workspace", id: workspaceId },
       });
     }
@@ -193,9 +212,17 @@ export const enter = mutation({
 });
 
 export const heartbeat = mutation({
-  args: { workspaceId: v.id("workspaces"), sessionId: v.string() },
-  handler: async (ctx, { workspaceId, sessionId: rawSessionId }) => {
-    const { user } = await requireTeacherWorkspace(ctx, workspaceId);
+  args: {
+    workspaceId: v.id("workspaces"),
+    sessionId: v.string(),
+    viewKind: v.optional(viewKind),
+  },
+  handler: async (ctx, { workspaceId, sessionId: rawSessionId, viewKind = "workspace" }) => {
+    const { user } =
+      viewKind === "work_history"
+        ? await requireHistoryReader(ctx, workspaceId)
+        : await requireTeacherWorkspace(ctx, workspaceId);
+    if (user.role !== "teacher") throw new ConvexError("Forbidden");
     const sessionId = cleanSessionId(rawSessionId);
     const presence = await ctx.db
       .query("workspaceViewerPresences")
@@ -203,7 +230,12 @@ export const heartbeat = mutation({
         index.eq("workspaceId", workspaceId).eq("sessionId", sessionId),
       )
       .unique();
-    if (!presence || presence.teacherId !== user._id || presence.expiresAt <= Date.now()) {
+    if (
+      !presence ||
+      presence.teacherId !== user._id ||
+      (presence.viewKind ?? "workspace") !== viewKind ||
+      presence.expiresAt <= Date.now()
+    ) {
       throw new ConvexError("Viewer session ended");
     }
     const expiresAt = Date.now() + VIEWER_PRESENCE_TTL_MS;
@@ -255,7 +287,18 @@ export const listViewers = query({
         activeTeacherIds.map(async (teacherId) => {
           const teacher = await ctx.db.get(teacherId);
           return teacher?.role === "teacher"
-            ? { teacherId: teacher._id, displayName: teacher.displayName }
+            ? {
+                teacherId: teacher._id,
+                displayName: teacher.displayName,
+                viewKind: presences.some(
+                  (presence) =>
+                    presence.teacherId === teacherId &&
+                    presence.expiresAt > Date.now() &&
+                    presence.viewKind === "work_history",
+                )
+                  ? ("work_history" as const)
+                  : ("workspace" as const),
+              }
             : null;
         }),
       )

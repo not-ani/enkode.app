@@ -1,10 +1,13 @@
-import { api } from "@enkode.app/backend/convex/_generated/api";
+import { api } from "@/lib/convex-api";
 import { Button } from "@enkode.app/ui/components/button";
 import { Input } from "@enkode.app/ui/components/input";
 import { Textarea } from "@enkode.app/ui/components/textarea";
 import { createFileRoute } from "@tanstack/react-router";
 import { useMutation, useQuery } from "convex/react";
+import type { FunctionReturnType } from "convex/server";
 import { useState, type FormEvent } from "react";
+
+import { messageFrom } from "@/lib/error-message";
 
 import ClassroomEnrollments from "@/components/classroom-enrollments";
 import AssignmentAuthoring from "@/components/assignment-authoring";
@@ -18,42 +21,20 @@ import StudentManagement from "@/components/student-management";
 import WorkHistoryList from "@/components/work-history-list";
 import ArchiveActions from "@/components/archive-actions";
 import AuditEventExplorer from "@/components/audit-event-explorer";
+import CourseLibrary from "@/components/course-library";
 
 export const Route = createFileRoute("/_auth/dashboard")({ component: DashboardContent });
 
-type TeacherAssignment = { teacherId: string; displayName: string; username: string };
-type CourseSummary = {
-  _id: string;
-  name: string;
-  description?: string;
-  collaborators: TeacherAssignment[];
-};
-type ClassroomSummary = {
-  _id: string;
-  name: string;
-  courseName: string;
-  teachers: TeacherAssignment[];
-};
-
-function messageFrom(error: unknown) {
-  return error instanceof Error ? error.message : "Something went wrong. Please try again.";
-}
+type CourseSummary = FunctionReturnType<typeof api.courses.listMine>[number];
+type ClassroomSummary = FunctionReturnType<typeof api.classrooms.listMine>[number];
+type TeacherAssignment = CourseSummary["collaborators"][number];
 
 function DashboardContent() {
   const currentUser = useQuery(api.users.current);
   const teacherQuery = currentUser?.role === "teacher" ? {} : "skip";
-  const courses = useQuery(api.courses.listMine, teacherQuery) as CourseSummary[] | undefined;
-  const classrooms = useQuery(api.classrooms.listMine, teacherQuery) as
-    | ClassroomSummary[]
-    | undefined;
-  const archived = useQuery(api.archive.listArchived, teacherQuery) as
-    | {
-        assignments: { _id: string; title: string; archivedAt: number }[];
-        courses: { _id: string; name: string; archivedAt: number }[];
-        classrooms: { _id: string; name: string; archivedAt: number }[];
-        materials: { _id: string; title: string; archivedAt: number }[];
-      }
-    | undefined;
+  const courses = useQuery(api.courses.listMine, teacherQuery);
+  const classrooms = useQuery(api.classrooms.listMine, teacherQuery);
+  const archived = useQuery(api.archive.listArchived, teacherQuery);
   const createCourse = useMutation(api.courses.create);
   const createClassroom = useMutation(api.classrooms.create);
   const [courseError, setCourseError] = useState<string>();
@@ -257,19 +238,14 @@ function DashboardContent() {
 function ArchivedTeaching({
   items,
 }: {
-  items: {
-    assignments: { _id: string; title: string; archivedAt: number }[];
-    courses: { _id: string; name: string; archivedAt: number }[];
-    classrooms: { _id: string; name: string; archivedAt: number }[];
-    materials: { _id: string; title: string; archivedAt: number }[];
-  };
+  items: NonNullable<FunctionReturnType<typeof api.archive.listArchived>>;
 }) {
   const rows = [
     ...items.courses.map((item) => ({ ...item, label: item.name, kind: "Course" })),
     ...items.classrooms.map((item) => ({ ...item, label: item.name, kind: "Classroom" })),
     ...items.assignments.map((item) => ({ ...item, label: item.title, kind: "Assignment" })),
     ...items.materials.map((item) => ({ ...item, label: item.title, kind: "Material" })),
-  ].sort((left, right) => right.archivedAt - left.archivedAt);
+  ].sort((left, right) => (right.archivedAt ?? 0) - (left.archivedAt ?? 0));
   if (rows.length === 0) return null;
   return (
     <details className="border-y border-foreground/10 py-5">
@@ -290,9 +266,7 @@ function ArchivedTeaching({
 }
 
 function StudentDashboard({ displayName }: { displayName: string }) {
-  const classrooms = useQuery(api.enrollments.listMine) as
-    | { enrollmentId: string; classroomId: string; classroomName: string; courseName: string }[]
-    | undefined;
+  const classrooms = useQuery(api.enrollments.listMine);
 
   return (
     <main className="isolate p-6">
@@ -364,6 +338,7 @@ function TeachingList(
                   <>
                     <AssignmentAuthoring courseId={item._id} />
                     <MaterialAuthoring courseId={item._id} />
+                    <CourseLibrary courseId={item._id} />
                   </>
                 ) : null}
               </li>

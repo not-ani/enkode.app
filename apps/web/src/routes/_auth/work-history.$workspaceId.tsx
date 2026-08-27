@@ -1,39 +1,33 @@
-import { api } from "@enkode.app/backend/convex/_generated/api";
+import { api } from "@/lib/convex-api";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useAction, useMutation, useQuery } from "convex/react";
 import { useCallback } from "react";
 
-import WorkHistoryReplay, { type ReplayPage } from "@/components/work-history-replay";
-import IntegritySignalReview, { type IntegritySignal } from "@/components/integrity-signal-review";
+import WorkHistoryReplay from "@/components/work-history-replay";
+import IntegritySignalReview from "@/components/integrity-signal-review";
+import { useTeacherPresence } from "@/components/use-teacher-presence";
 
 export const Route = createFileRoute("/_auth/work-history/$workspaceId")({
   component: WorkHistoryRoute,
 });
 
-type Description = {
-  assignmentTitle: string;
-  classroomName: string;
-  studentName: string;
-  studentUsername: string;
-  committedThrough: number;
-  viewerRole: "student" | "teacher";
-};
-
 function WorkHistoryRoute() {
   const { workspaceId } = Route.useParams();
-  const description = useQuery(api.workHistoryReplay.describe, { workspaceId }) as
-    | Description
-    | undefined;
+  const description = useQuery(api.workHistoryReplay.describe, { workspaceId });
   const readNext = useAction(api.workHistoryReplayRead.readNext);
   const inspectSignal = useAction(api.integritySignalEvidence.inspect);
   const reviewSignal = useMutation(api.integritySignals.review);
   const signals = useQuery(
     api.integritySignals.listForWorkspace,
     description?.viewerRole === "teacher" ? { workspaceId } : "skip",
-  ) as IntegritySignal[] | undefined;
+  );
+  const presence = useTeacherPresence(
+    workspaceId,
+    "work_history",
+    description?.viewerRole === "teacher",
+  );
   const loadPage = useCallback(
-    async (afterSequence: number) =>
-      (await readNext({ workspaceId, afterSequence })) as ReplayPage | undefined,
+    async (afterSequence: number) => (await readNext({ workspaceId, afterSequence })) ?? undefined,
     [readNext, workspaceId],
   );
 
@@ -60,6 +54,9 @@ function WorkHistoryRoute() {
           <p className="mt-1 text-sm text-muted-foreground">
             A read-only replay of committed Workspace states.
           </p>
+          {description.viewerRole === "teacher" && presence.error ? (
+            <p className="mt-1 text-sm text-destructive">{presence.error}</p>
+          ) : null}
         </header>
         <WorkHistoryReplay committedThrough={description.committedThrough} loadPage={loadPage} />
         {description.viewerRole === "teacher" ? (
@@ -67,9 +64,9 @@ function WorkHistoryRoute() {
             <IntegritySignalReview
               signals={signals}
               inspect={async (signalId) => await inspectSignal({ signalId })}
-              review={async (signalId, state, note) =>
-                await reviewSignal({ signalId, state, note })
-              }
+              review={async (signalId, state, note) => {
+                await reviewSignal({ signalId, state, note });
+              }}
             />
           ) : (
             <p className="text-sm text-muted-foreground">Loading Integrity Signals…</p>

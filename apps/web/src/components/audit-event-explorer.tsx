@@ -1,15 +1,5 @@
-import { api } from "@enkode.app/backend/convex/_generated/api";
+import { api } from "@/lib/convex-api";
 import { useQuery } from "convex/react";
-
-type AuditEvent = {
-  id: string;
-  action: string;
-  actor:
-    | { kind: "developer" }
-    | { kind: "user"; id?: string; displayName: string; username?: string };
-  resource: { kind: string; id: string };
-  occurredAt: number;
-};
 
 function words(value: string) {
   return value.replaceAll("_", " ").replaceAll(".", " · ");
@@ -20,7 +10,7 @@ function timestamp(value: number) {
 }
 
 export default function AuditEventExplorer() {
-  const events = useQuery(api.audit.listMine, { limit: 100 }) as AuditEvent[] | undefined;
+  const events = useQuery(api.audit.listMine, { limit: 100 });
 
   return (
     <section className="border-y border-foreground/10 py-6" aria-labelledby="audit-events-title">

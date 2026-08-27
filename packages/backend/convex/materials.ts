@@ -2,16 +2,15 @@ import { ConvexError, v } from "convex/values";
 
 import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
-import { mutation, query } from "./_generated/server";
+import { internalMutation, internalQuery, mutation, query } from "./_generated/server";
 import { appendAuditEvent } from "./audit";
 import { requireCourseCollaborator } from "./authorization";
 import { requireWritableCourse, requireWritableMaterial } from "./lifecycleGuards";
-import { configuredObjectStorage, storedObjectReceipt } from "./objectStorage";
 
 const materialContent = v.union(
   v.object({ kind: v.literal("rich_text"), richText: v.string() }),
   v.object({ kind: v.literal("external_link"), externalUrl: v.string() }),
-  v.object({ kind: v.literal("file"), attachment: storedObjectReceipt }),
+  v.object({ kind: v.literal("file"), attachmentId: v.id("materialAttachments") }),
 );
 
 type MaterialContent =
@@ -19,13 +18,7 @@ type MaterialContent =
   | { kind: "external_link"; externalUrl: string }
   | {
       kind: "file";
-      attachment: {
-        storageKey: string;
-        filename: string;
-        contentType: string;
-        byteSize: number;
-        sha256: string;
-      };
+      attachmentId: Id<"materialAttachments">;
     };
 
 function cleanRequired(value: string, label: string) {
@@ -53,23 +46,21 @@ async function insertVersion(
   const version = material.latestVersion + 1;
   let attachmentId: Id<"materialAttachments"> | undefined;
   if (content.kind === "file") {
-    const metadata = configuredObjectStorage().completeUpload(content.attachment);
-    const existing = await ctx.db
-      .query("materialAttachments")
-      .withIndex("by_storage_location", (index) =>
-        index
-          .eq("storageProvider", metadata.storageProvider)
-          .eq("storageBucket", metadata.storageBucket)
-          .eq("storageKey", metadata.storageKey),
-      )
-      .unique();
-    if (existing) throw new ConvexError("This stored attachment is already registered");
-    attachmentId = await ctx.db.insert("materialAttachments", {
-      organizationId: material.organizationId,
-      ...metadata,
-      createdBy,
-      createdAt: Date.now(),
-    });
+    const attachment = await ctx.db.get(content.attachmentId);
+    if (
+      !attachment ||
+      attachment.organizationId !== material.organizationId ||
+      attachment.courseId !== material.courseId ||
+      attachment.createdBy !== createdBy
+    ) {
+      throw new ConvexError("Uploaded attachment is unavailable");
+    }
+    const existingVersion = await ctx.db
+      .query("materialVersions")
+      .filter((filter) => filter.eq(filter.field("attachmentId"), attachment._id))
+      .first();
+    if (existingVersion) throw new ConvexError("Uploaded attachment is already in use");
+    attachmentId = attachment._id;
   }
   const materialVersionId = await ctx.db.insert("materialVersions", {
     organizationId: material.organizationId,
@@ -109,6 +100,19 @@ export const create = mutation({
     });
     const material = await ctx.db.get(materialId);
     if (!material) throw new ConvexError("Material could not be created");
+    const lastLibraryItem = await ctx.db
+      .query("courseLibraryItems")
+      .withIndex("by_course", (index) => index.eq("courseId", courseId))
+      .order("desc")
+      .first();
+    await ctx.db.insert("courseLibraryItems", {
+      organizationId: organization._id,
+      courseId,
+      kind: "material",
+      materialId,
+      order: (lastLibraryItem?.order ?? -1) + 1,
+      createdAt: Date.now(),
+    });
     const materialVersionId = await insertVersion(ctx, material, user._id, content);
     await appendAuditEvent(ctx, {
       organizationId: organization._id,
@@ -163,5 +167,48 @@ export const getVersion = query({
     if (!material) throw new ConvexError("Material not found");
     await requireCourseCollaborator(ctx, material.courseId);
     return await versionSummary(ctx, version);
+  },
+});
+
+export const authorizeAttachmentUpload = internalQuery({
+  args: { courseId: v.id("courses") },
+  handler: async (ctx, { courseId }) => {
+    const { organization, user } = await requireCourseCollaborator(ctx, courseId);
+    await requireWritableCourse(ctx, courseId);
+    return { organizationId: organization._id, userId: user._id };
+  },
+});
+
+export const registerAttachmentUpload = internalMutation({
+  args: {
+    courseId: v.id("courses"),
+    storageProvider: v.string(),
+    storageBucket: v.string(),
+    storageKey: v.string(),
+    filename: v.string(),
+    contentType: v.string(),
+    byteSize: v.number(),
+    sha256: v.string(),
+  },
+  handler: async (ctx, { courseId, ...metadata }) => {
+    const { organization, user } = await requireCourseCollaborator(ctx, courseId);
+    await requireWritableCourse(ctx, courseId);
+    const existing = await ctx.db
+      .query("materialAttachments")
+      .withIndex("by_storage_location", (index) =>
+        index
+          .eq("storageProvider", metadata.storageProvider)
+          .eq("storageBucket", metadata.storageBucket)
+          .eq("storageKey", metadata.storageKey),
+      )
+      .unique();
+    if (existing) return existing._id;
+    return await ctx.db.insert("materialAttachments", {
+      organizationId: organization._id,
+      courseId,
+      ...metadata,
+      createdBy: user._id,
+      createdAt: Date.now(),
+    });
   },
 });

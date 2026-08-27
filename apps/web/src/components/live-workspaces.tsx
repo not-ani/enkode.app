@@ -1,20 +1,9 @@
-import { api } from "@enkode.app/backend/convex/_generated/api";
+import { api } from "@/lib/convex-api";
 import { Link } from "@tanstack/react-router";
 import { useQuery } from "convex/react";
 
-type LiveWorkspaceSummary = {
-  workspaceId: string;
-  assignmentTitle: string;
-  classroomName: string;
-  studentDisplayName: string;
-  studentUsername: string;
-  updatedAt: number;
-};
-
 export default function LiveWorkspaces() {
-  const workspaces = useQuery(api.liveWorkspaces.listForTeacher) as
-    | LiveWorkspaceSummary[]
-    | undefined;
+  const workspaces = useQuery(api.liveWorkspaces.listForTeacher);
 
   return (
     <section className="flex max-w-2xl flex-col gap-3">

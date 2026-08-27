@@ -7,6 +7,10 @@ import { reconstructReplayFrames } from "@enkode.app/backend/convex/workHistoryR
 import { Button } from "@enkode.app/ui/components/button";
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { messageFrom } from "@/lib/error-message";
+
+export type { ReplayEvent } from "@enkode.app/backend/convex/workHistoryReplayModel";
+
 export type ReplayPage = {
   baselineFiles: ReplayFile[];
   events: ReplayEvent[];
@@ -31,6 +35,7 @@ function eventLabel(event: ReplayEvent) {
   if (event.type === "file_change") {
     return `Edit Origin: ${originLabels[event.origin] ?? event.origin}`;
   }
+  if (event.type === "assignment_version_merge") return "Assignment Version merge";
   if (event.type === "run") return `Run: ${event.status}`;
   return `Submitted attempt ${event.attemptNumber}`;
 }
@@ -66,7 +71,7 @@ export default function WorkHistoryReplay({
         setFrames((current) => [...current, ...nextFrames]);
         setNextSequence(page.nextSequence);
       } catch (caught) {
-        setError(caught instanceof Error ? caught.message : "Could not load Work History");
+        setError(messageFrom(caught, "Could not load Work History"));
       } finally {
         setLoading(false);
       }
