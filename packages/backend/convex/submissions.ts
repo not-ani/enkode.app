@@ -1,0 +1,364 @@
+import { ConvexError, v } from "convex/values";
+
+import type { Doc } from "./_generated/dataModel";
+import { internal } from "./_generated/api";
+import { internalMutation, internalQuery, query } from "./_generated/server";
+import { requireClassroomTeacher, requireRole } from "./authorization";
+import { effectiveDeadline, submissionEligibility } from "./deadlinePolicy";
+import { requireWritableAssignmentRelease } from "./lifecycleGuards";
+import { notifySubmissionNeedsReview } from "./notificationEvents";
+import { releasePublicationStatus } from "./releasePolicy";
+
+const workspaceFile = v.object({ path: v.string(), content: v.string() });
+const executionResult = v.object({
+  status: v.union(v.literal("completed"), v.literal("failed"), v.literal("timed_out")),
+  stdout: v.string(),
+  stderr: v.string(),
+  exitCode: v.union(v.number(), v.null()),
+  signal: v.union(v.string(), v.null()),
+});
+const testResult = v.object({
+  evaluationTestId: v.id("evaluationTests"),
+  name: v.string(),
+  visibility: v.union(v.literal("public"), v.literal("hidden")),
+  weight: v.number(),
+  passed: v.boolean(),
+  guidance: v.optional(v.string()),
+  stdout: v.string(),
+  stderr: v.string(),
+  exitCode: v.union(v.number(), v.null()),
+});
+
+function sameFiles(left: { path: string; content: string }[], right: typeof left) {
+  return (
+    left.length === right.length &&
+    left.every(
+      (file, index) => file.path === right[index]?.path && file.content === right[index].content,
+    )
+  );
+}
+
+function studentVisible(submission: Doc<"submissions">) {
+  return {
+    ...submission,
+    testResults: submission.testResults.map((result) =>
+      result.visibility === "public"
+        ? result
+        : {
+            visibility: result.visibility,
+            weight: result.weight,
+            passed: result.passed,
+            ...(result.guidance === undefined ? {} : { guidance: result.guidance }),
+          },
+    ),
+  };
+}
+
+async function eligibilityFor(
+  ctx: Parameters<typeof requireRole>[0],
+  release: Doc<"assignmentReleases">,
+  studentId: Doc<"users">["_id"],
+  attemptsUsed: number,
+  now = Date.now(),
+) {
+  const exception = await ctx.db
+    .query("deadlineExceptions")
+    .withIndex("by_release_student", (index) =>
+      index.eq("assignmentReleaseId", release._id).eq("studentId", studentId),
+    )
+    .unique();
+  const deadline = effectiveDeadline(release, exception);
+  return {
+    deadline,
+    eligibility: submissionEligibility({
+      ...deadline,
+      submissionLimit: release.submissionLimit,
+      attemptsUsed,
+      now,
+    }),
+  };
+}
+
+export const prepare = internalQuery({
+  args: {
+    workspaceId: v.id("workspaces"),
+    files: v.array(workspaceFile),
+    requiredHistorySequence: v.number(),
+    idempotencyKey: v.string(),
+  },
+  handler: async (ctx, input) => {
+    const { organization, user } = await requireRole(ctx, "student");
+    const workspace = await ctx.db.get(input.workspaceId);
+    if (
+      !workspace ||
+      workspace.organizationId !== organization._id ||
+      workspace.studentId !== user._id
+    ) {
+      throw new ConvexError("Forbidden");
+    }
+    const existing = await ctx.db
+      .query("submissions")
+      .withIndex("by_workspace_idempotency", (index) =>
+        index.eq("workspaceId", workspace._id).eq("idempotencyKey", input.idempotencyKey),
+      )
+      .unique();
+    if (existing) return { existing: studentVisible(existing) };
+    if (!input.idempotencyKey.trim()) throw new ConvexError("Submission retry key is required");
+    if (!Number.isSafeInteger(input.requiredHistorySequence) || input.requiredHistorySequence < 1) {
+      throw new ConvexError("Submission requires finalized Work History");
+    }
+    if ((workspace.historyAckSequence ?? 0) < input.requiredHistorySequence) {
+      throw new ConvexError("Required Work History is not durably acknowledged");
+    }
+    const historyChunk = await ctx.db
+      .query("workHistoryChunks")
+      .withIndex("by_workspace_sequence", (index) => index.eq("workspaceId", workspace._id))
+      .filter((filter) => filter.eq(filter.field("endSequence"), input.requiredHistorySequence))
+      .unique();
+    if (!historyChunk?.snapshotHash || !historyChunk.snapshotObjectKey) {
+      throw new ConvexError("Finalized Work History snapshot is unavailable");
+    }
+    if (!sameFiles(workspace.files, input.files)) {
+      throw new ConvexError("Save the current Workspace before submitting");
+    }
+    const [release, version] = await Promise.all([
+      ctx.db.get(workspace.assignmentReleaseId),
+      ctx.db.get(workspace.assignmentVersionId),
+    ]);
+    if (
+      !release ||
+      releasePublicationStatus(release) !== "published" ||
+      !version ||
+      version.assignmentId !== release.assignmentId
+    ) {
+      throw new ConvexError("Workspace Assignment Version is unavailable");
+    }
+    await requireWritableAssignmentRelease(ctx, release._id);
+    const enrollment = await ctx.db
+      .query("enrollments")
+      .withIndex("by_classroom_student", (index) =>
+        index.eq("classroomId", release.classroomId).eq("studentId", user._id),
+      )
+      .unique();
+    if (!enrollment || enrollment.status !== "active") throw new ConvexError("Forbidden");
+    const attempts = await ctx.db
+      .query("submissions")
+      .withIndex("by_workspace_attempt", (index) => index.eq("workspaceId", workspace._id))
+      .collect();
+    const { eligibility } = await eligibilityFor(ctx, release, user._id, attempts.length);
+    if (!eligibility.canSubmit) {
+      throw new ConvexError(eligibility.reason ?? "Submission is unavailable");
+    }
+    const tests = await ctx.db
+      .query("evaluationTests")
+      .withIndex("by_version", (index) => index.eq("assignmentVersionId", version._id))
+      .collect();
+    return {
+      organizationId: organization._id,
+      studentId: user._id,
+      assignmentReleaseId: release._id,
+      assignmentVersionId: version._id,
+      language: version.language,
+      runtimeVersion: version.runtimeVersion,
+      entrypoint: version.entrypoint,
+      files: input.files,
+      requiredHistorySequence: input.requiredHistorySequence,
+      historySnapshot: {
+        objectKey: historyChunk.snapshotObjectKey,
+        contentHash: historyChunk.snapshotHash,
+        byteLength: historyChunk.snapshotByteLength,
+        manifest: historyChunk,
+      },
+      idempotencyKey: input.idempotencyKey,
+      tests,
+    };
+  },
+});
+
+export const record = internalMutation({
+  args: {
+    workspaceId: v.id("workspaces"),
+    organizationId: v.id("organizations"),
+    studentId: v.id("users"),
+    assignmentReleaseId: v.id("assignmentReleases"),
+    assignmentVersionId: v.id("assignmentVersions"),
+    language: v.optional(
+      v.union(
+        v.literal("python"),
+        v.literal("javascript"),
+        v.literal("typescript"),
+        v.literal("java"),
+      ),
+    ),
+    runtimeVersion: v.string(),
+    entrypoint: v.string(),
+    historySequence: v.number(),
+    idempotencyKey: v.string(),
+    snapshot: v.object({
+      objectKey: v.string(),
+      contentHash: v.string(),
+      byteLength: v.number(),
+      files: v.array(
+        v.object({ path: v.string(), contentHash: v.string(), byteLength: v.number() }),
+      ),
+    }),
+    execution: executionResult,
+    testResults: v.array(testResult),
+    proposedPoints: v.number(),
+  },
+  handler: async (ctx, input) => {
+    const { user } = await requireRole(ctx, "student");
+    const workspace = await ctx.db.get(input.workspaceId);
+    if (!workspace || workspace.studentId !== user._id || input.studentId !== user._id) {
+      throw new ConvexError("Forbidden");
+    }
+    const existing = await ctx.db
+      .query("submissions")
+      .withIndex("by_workspace_idempotency", (index) =>
+        index.eq("workspaceId", workspace._id).eq("idempotencyKey", input.idempotencyKey),
+      )
+      .unique();
+    if (existing) return studentVisible(existing);
+    await requireWritableAssignmentRelease(ctx, input.assignmentReleaseId);
+    const release = await ctx.db.get(workspace.assignmentReleaseId);
+    if (
+      !release ||
+      release._id !== input.assignmentReleaseId ||
+      release.organizationId !== input.organizationId ||
+      workspace.assignmentVersionId !== input.assignmentVersionId ||
+      workspace.organizationId !== input.organizationId
+    ) {
+      throw new ConvexError("Workspace Assignment Version is unavailable");
+    }
+    const attempts = await ctx.db
+      .query("submissions")
+      .withIndex("by_release_student_attempt", (index) =>
+        index.eq("assignmentReleaseId", release._id).eq("studentId", user._id),
+      )
+      .collect();
+    const now = Date.now();
+    const { deadline, eligibility } = await eligibilityFor(
+      ctx,
+      release,
+      user._id,
+      attempts.length,
+      now,
+    );
+    if (!eligibility.canSubmit) {
+      throw new ConvexError(eligibility.reason ?? "Submission is unavailable");
+    }
+    const snapshotId = await ctx.db.insert("submissionSnapshots", {
+      organizationId: input.organizationId,
+      workspaceId: input.workspaceId,
+      assignmentVersionId: input.assignmentVersionId,
+      historySequence: input.historySequence,
+      ...input.snapshot,
+      createdAt: now,
+    });
+    const submissionId = await ctx.db.insert("submissions", {
+      organizationId: input.organizationId,
+      workspaceId: input.workspaceId,
+      assignmentReleaseId: input.assignmentReleaseId,
+      assignmentVersionId: input.assignmentVersionId,
+      studentId: input.studentId,
+      snapshotId,
+      idempotencyKey: input.idempotencyKey,
+      attemptNumber: attempts.length + 1,
+      language: input.language,
+      runtimeVersion: input.runtimeVersion,
+      entrypoint: input.entrypoint,
+      execution: input.execution,
+      testResults: input.testResults,
+      proposedPoints: input.proposedPoints,
+      late: eligibility.late,
+      effectiveDeadlineAt: deadline.deadlineAt,
+      submittedAt: now,
+    });
+    const submission = await ctx.db.get(submissionId);
+    if (submission) await notifySubmissionNeedsReview(ctx, submission);
+    await ctx.scheduler.runAfter(0, internal.submissionSimilarity.compare, { submissionId });
+    return studentVisible((await ctx.db.get(submissionId))!);
+  },
+});
+
+export const similarityPlan = internalQuery({
+  args: { submissionId: v.id("submissions") },
+  handler: async (ctx, { submissionId }) => {
+    const submission = await ctx.db.get(submissionId);
+    if (!submission) throw new ConvexError("Submission not found");
+    const snapshot = await ctx.db.get(submission.snapshotId);
+    if (!snapshot || snapshot.organizationId !== submission.organizationId) {
+      throw new ConvexError("Submission snapshot is unavailable");
+    }
+    const candidates = await ctx.db
+      .query("submissions")
+      .withIndex("by_organization_version", (index) =>
+        index
+          .eq("organizationId", submission.organizationId)
+          .eq("assignmentVersionId", submission.assignmentVersionId),
+      )
+      .filter((filter) =>
+        filter.and(
+          filter.neq(filter.field("_id"), submission._id),
+          filter.neq(filter.field("studentId"), submission.studentId),
+        ),
+      )
+      .collect();
+    const candidateSnapshots = await Promise.all(
+      candidates.map(async (candidate) => {
+        const candidateSnapshot = await ctx.db.get(candidate.snapshotId);
+        if (
+          !candidateSnapshot ||
+          candidateSnapshot.organizationId !== submission.organizationId ||
+          candidateSnapshot.assignmentVersionId !== submission.assignmentVersionId
+        ) {
+          throw new ConvexError("Related Submission snapshot is unavailable");
+        }
+        return { submission: candidate, snapshot: candidateSnapshot };
+      }),
+    );
+    const starterFiles = await ctx.db
+      .query("assignmentStarterFiles")
+      .withIndex("by_version", (index) =>
+        index.eq("assignmentVersionId", submission.assignmentVersionId),
+      )
+      .collect();
+    return { submission, snapshot, candidates: candidateSnapshots, starterFiles };
+  },
+});
+
+export const mine = query({
+  args: { workspaceId: v.id("workspaces") },
+  handler: async (ctx, { workspaceId }) => {
+    const { user } = await requireRole(ctx, "student");
+    const workspace = await ctx.db.get(workspaceId);
+    if (!workspace || workspace.studentId !== user._id) throw new ConvexError("Forbidden");
+    const submissions = await ctx.db
+      .query("submissions")
+      .withIndex("by_workspace_attempt", (index) => index.eq("workspaceId", workspaceId))
+      .collect();
+    return submissions.reverse().map((submission, index) => ({
+      ...studentVisible(submission),
+      current: index === 0,
+    }));
+  },
+});
+
+export const forTeacher = query({
+  args: { assignmentReleaseId: v.id("assignmentReleases"), studentId: v.id("users") },
+  handler: async (ctx, { assignmentReleaseId, studentId }) => {
+    const release = await ctx.db.get(assignmentReleaseId);
+    if (!release) throw new ConvexError("Assignment Release not found");
+    await requireClassroomTeacher(ctx, release.classroomId);
+    const submissions = await ctx.db
+      .query("submissions")
+      .withIndex("by_release_student_attempt", (index) =>
+        index.eq("assignmentReleaseId", assignmentReleaseId).eq("studentId", studentId),
+      )
+      .collect();
+    return submissions.reverse().map((submission, index) => ({
+      ...submission,
+      current: index === 0,
+    }));
+  },
+});

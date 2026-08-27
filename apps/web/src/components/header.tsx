@@ -1,4 +1,8 @@
 import { Link } from "@tanstack/react-router";
+import { Authenticated } from "convex/react";
+
+import UserMenu from "./user-menu";
+import NotificationCenter from "./notification-center";
 
 export default function Header() {
   const links = [
@@ -18,7 +22,12 @@ export default function Header() {
             );
           })}
         </nav>
-        <div className="flex items-center gap-2"></div>
+        <Authenticated>
+          <div className="flex items-center gap-1">
+            <NotificationCenter />
+            <UserMenu />
+          </div>
+        </Authenticated>
       </div>
       <hr />
     </div>

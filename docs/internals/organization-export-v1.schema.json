@@ -1,0 +1,148 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://enkode.app/schemas/organization-export-v1.schema.json",
+  "title": "Enkode Organization Export v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format", "version", "exportedAt", "organization", "records", "objects"],
+  "properties": {
+    "format": { "const": "enkode.organization-export" },
+    "version": { "const": 1 },
+    "exportedAt": { "type": "string", "format": "date-time" },
+    "organization": {
+      "allOf": [
+        { "$ref": "#/$defs/record" },
+        {
+          "type": "object",
+          "required": ["name", "slug"],
+          "properties": {
+            "name": { "type": "string" },
+            "slug": { "type": "string" }
+          }
+        }
+      ]
+    },
+    "records": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "users",
+        "courses",
+        "courseCollaborators",
+        "courseLibraryItems",
+        "assignments",
+        "assignmentVersions",
+        "assignmentStarterFiles",
+        "evaluationTests",
+        "materials",
+        "materialAttachments",
+        "materialVersions",
+        "classrooms",
+        "classroomTeachers",
+        "enrollments",
+        "assignmentReleases",
+        "assignmentReleaseAdoptions",
+        "deadlineExceptions",
+        "assignmentExcuses",
+        "materialReleases",
+        "workspaces",
+        "workspaceVersionMerges",
+        "workHistoryChunks",
+        "workspaceAssignmentVersionMergeEvents",
+        "runs",
+        "submissionSnapshots",
+        "submissions",
+        "integritySignals",
+        "grades",
+        "gradeReturns",
+        "notifications",
+        "auditEvents"
+      ],
+      "properties": {
+        "users": { "$ref": "#/$defs/recordArray" },
+        "courses": { "$ref": "#/$defs/recordArray" },
+        "courseCollaborators": { "$ref": "#/$defs/recordArray" },
+        "courseLibraryItems": { "$ref": "#/$defs/recordArray" },
+        "assignments": { "$ref": "#/$defs/recordArray" },
+        "assignmentVersions": { "$ref": "#/$defs/recordArray" },
+        "assignmentStarterFiles": { "$ref": "#/$defs/recordArray" },
+        "evaluationTests": { "$ref": "#/$defs/recordArray" },
+        "materials": { "$ref": "#/$defs/recordArray" },
+        "materialAttachments": { "$ref": "#/$defs/recordArray" },
+        "materialVersions": { "$ref": "#/$defs/recordArray" },
+        "classrooms": { "$ref": "#/$defs/recordArray" },
+        "classroomTeachers": { "$ref": "#/$defs/recordArray" },
+        "enrollments": { "$ref": "#/$defs/recordArray" },
+        "assignmentReleases": { "$ref": "#/$defs/recordArray" },
+        "assignmentReleaseAdoptions": { "$ref": "#/$defs/recordArray" },
+        "deadlineExceptions": { "$ref": "#/$defs/recordArray" },
+        "assignmentExcuses": { "$ref": "#/$defs/recordArray" },
+        "materialReleases": { "$ref": "#/$defs/recordArray" },
+        "workspaces": { "$ref": "#/$defs/recordArray" },
+        "workspaceVersionMerges": { "$ref": "#/$defs/recordArray" },
+        "workHistoryChunks": { "$ref": "#/$defs/recordArray" },
+        "workspaceAssignmentVersionMergeEvents": { "$ref": "#/$defs/recordArray" },
+        "runs": { "$ref": "#/$defs/recordArray" },
+        "submissionSnapshots": { "$ref": "#/$defs/recordArray" },
+        "submissions": { "$ref": "#/$defs/recordArray" },
+        "integritySignals": { "$ref": "#/$defs/recordArray" },
+        "grades": { "$ref": "#/$defs/recordArray" },
+        "gradeReturns": { "$ref": "#/$defs/recordArray" },
+        "notifications": { "$ref": "#/$defs/recordArray" },
+        "auditEvents": { "$ref": "#/$defs/recordArray" }
+      }
+    },
+    "objects": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "path",
+          "contentType",
+          "byteLength",
+          "sha256",
+          "encoding",
+          "data",
+          "sourceReferences"
+        ],
+        "properties": {
+          "path": { "type": "string", "pattern": "^objects/sha256/[a-f0-9]{64}$" },
+          "contentType": { "type": "string", "minLength": 1 },
+          "byteLength": { "type": "integer", "minimum": 0 },
+          "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+          "encoding": { "const": "base64" },
+          "data": { "type": "string", "contentEncoding": "base64" },
+          "sourceReferences": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["kind", "recordId", "field"],
+              "properties": {
+                "kind": { "type": "string" },
+                "recordId": { "type": "string" },
+                "field": { "type": "string" }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "record": {
+      "type": "object",
+      "required": ["id", "createdAtInDatabase"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "createdAtInDatabase": { "type": "number" }
+      },
+      "additionalProperties": true
+    },
+    "recordArray": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/record" }
+    }
+  }
+}

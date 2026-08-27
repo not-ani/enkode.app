@@ -1,0 +1,285 @@
+import { ConvexError, v } from "convex/values";
+
+import type { Doc, Id } from "./_generated/dataModel";
+import type { QueryCtx } from "./_generated/server";
+import { mutation, query } from "./_generated/server";
+import { appendAuditEvent } from "./audit";
+import { requireClassroomTeacher, requireRole } from "./authorization";
+import { deriveDeadlineFacts, effectiveDeadline } from "./deadlinePolicy";
+import { deriveAssignmentStatus } from "./gradePolicy";
+import { requireWritableAssignmentRelease } from "./lifecycleGuards";
+import { releasePublicationStatus } from "./releasePolicy";
+
+function cellKey(assignmentReleaseId: Id<"assignmentReleases">, studentId: Id<"users">) {
+  return `${assignmentReleaseId}:${studentId}`;
+}
+
+function newestAttempt(submissions: Doc<"submissions">[]) {
+  return submissions.reduce<Doc<"submissions"> | undefined>(
+    (latest, submission) =>
+      !latest || submission.attemptNumber > latest.attemptNumber ? submission : latest,
+    undefined,
+  );
+}
+
+async function readGradebook(ctx: QueryCtx, classroomId: Id<"classrooms">) {
+  const { classroom } = await requireClassroomTeacher(ctx, classroomId);
+  const [course, enrollments, assignmentReleases] = await Promise.all([
+    ctx.db.get(classroom.courseId),
+    ctx.db
+      .query("enrollments")
+      .withIndex("by_classroom", (index) => index.eq("classroomId", classroomId))
+      .collect(),
+    ctx.db
+      .query("assignmentReleases")
+      .withIndex("by_classroom", (index) => index.eq("classroomId", classroomId))
+      .collect(),
+  ]);
+  if (!course) throw new ConvexError("Classroom Course is unavailable");
+
+  const releases = assignmentReleases.sort(
+    (left, right) => left.order - right.order || left.createdAt - right.createdAt,
+  );
+  const releaseRecords = await Promise.all(
+    releases.map(async (release) => {
+      const [assignment, version, submissions, grades, deadlineExceptions, excuses] =
+        await Promise.all([
+          ctx.db.get(release.assignmentId),
+          ctx.db.get(release.assignmentVersionId),
+          ctx.db
+            .query("submissions")
+            .withIndex("by_release_student_attempt", (index) =>
+              index.eq("assignmentReleaseId", release._id),
+            )
+            .collect(),
+          ctx.db
+            .query("grades")
+            .withIndex("by_release_student", (index) =>
+              index.eq("assignmentReleaseId", release._id),
+            )
+            .collect(),
+          ctx.db
+            .query("deadlineExceptions")
+            .withIndex("by_release", (index) => index.eq("assignmentReleaseId", release._id))
+            .collect(),
+          ctx.db
+            .query("assignmentExcuses")
+            .withIndex("by_release", (index) => index.eq("assignmentReleaseId", release._id))
+            .collect(),
+        ]);
+      if (!assignment || !version) {
+        throw new ConvexError("Assignment Release content is unavailable");
+      }
+      return { assignment, deadlineExceptions, excuses, grades, release, submissions, version };
+    }),
+  );
+
+  const academicStudentIds = new Set<Id<"users">>();
+  for (const { excuses, grades, submissions } of releaseRecords) {
+    for (const submission of submissions) academicStudentIds.add(submission.studentId);
+    for (const grade of grades) academicStudentIds.add(grade.studentId);
+    for (const excuse of excuses) academicStudentIds.add(excuse.studentId);
+  }
+  const relevantEnrollments = enrollments.filter(
+    (enrollment) => enrollment.status === "active" || academicStudentIds.has(enrollment.studentId),
+  );
+  const students = await Promise.all(
+    relevantEnrollments.map(async (enrollment) => {
+      const student = await ctx.db.get(enrollment.studentId);
+      if (!student || student.role !== "student") {
+        throw new ConvexError("Enrolled Student is unavailable");
+      }
+      return { enrollment, student };
+    }),
+  );
+  students.sort(
+    (left, right) =>
+      left.student.displayName.localeCompare(right.student.displayName) ||
+      left.student.username.localeCompare(right.student.username),
+  );
+
+  const submissionsByCell = new Map<string, Doc<"submissions">[]>();
+  const gradesByCell = new Map<string, Doc<"grades">>();
+  for (const { grades, release, submissions } of releaseRecords) {
+    for (const submission of submissions) {
+      const key = cellKey(release._id, submission.studentId);
+      const attempts = submissionsByCell.get(key) ?? [];
+      attempts.push(submission);
+      submissionsByCell.set(key, attempts);
+    }
+    for (const grade of grades) gradesByCell.set(cellKey(release._id, grade.studentId), grade);
+  }
+  const returnedAttemptByGrade = new Map<Id<"grades">, number>();
+  await Promise.all(
+    [...gradesByCell.values()].map(async (grade) => {
+      if (!grade.latestReturnId) return;
+      const gradeReturn = await ctx.db.get(grade.latestReturnId);
+      if (!gradeReturn) throw new ConvexError("Returned Grade is unavailable");
+      const submission = await ctx.db.get(gradeReturn.submissionId);
+      if (!submission) throw new ConvexError("Returned Grade Submission is unavailable");
+      returnedAttemptByGrade.set(grade._id, submission.attemptNumber);
+    }),
+  );
+
+  return {
+    classroom: { id: classroom._id, name: classroom.name, courseName: course.name },
+    releases: releaseRecords.map(({ assignment, release, version }) => ({
+      id: release._id,
+      assignmentTitle: assignment.title,
+      version: version.version,
+      points: release.points,
+      order: release.order,
+      publicationStatus: releasePublicationStatus(release),
+    })),
+    students: students.map(({ enrollment, student }) => ({
+      id: student._id,
+      displayName: student.displayName,
+      username: student.username,
+      enrollmentStatus: enrollment.status,
+      cells: releaseRecords.map(({ deadlineExceptions, excuses, release }) => {
+        const key = cellKey(release._id, student._id);
+        const attempts = submissionsByCell.get(key) ?? [];
+        const grade = gradesByCell.get(key);
+        const latestSubmission = newestAttempt(attempts);
+        const exception = deadlineExceptions.find(({ studentId }) => studentId === student._id);
+        const deadline = effectiveDeadline(release, exception);
+        const excuse = excuses.find(({ studentId }) => studentId === student._id);
+        const excused = excuse !== undefined;
+        const deadlineFacts = deriveDeadlineFacts({
+          deadlineAt: deadline.deadlineAt,
+          attemptsUsed: attempts.length,
+          hasLateSubmission: attempts.some(({ late }) => late === true),
+          now: Date.now(),
+        });
+        return {
+          assignmentReleaseId: release._id,
+          points: grade?.points,
+          excuseReason: excuse?.reason,
+          deadlineFacts: { ...deadlineFacts, missing: !excused && deadlineFacts.missing },
+          status: deriveAssignmentStatus({
+            excused,
+            latestSubmissionAttempt: latestSubmission?.attemptNumber,
+            returnedSubmissionAttempt: grade ? returnedAttemptByGrade.get(grade._id) : undefined,
+          }),
+        };
+      }),
+    })),
+  };
+}
+
+export const forClassroom = query({
+  args: { classroomId: v.id("classrooms") },
+  handler: async (ctx, { classroomId }) => await readGradebook(ctx, classroomId),
+});
+
+function cleanReason(reason: string | undefined) {
+  const cleaned = reason?.trim();
+  return cleaned || undefined;
+}
+
+export const setExcuse = mutation({
+  args: {
+    assignmentReleaseId: v.id("assignmentReleases"),
+    studentId: v.id("users"),
+    reason: v.optional(v.string()),
+  },
+  handler: async (ctx, { assignmentReleaseId, studentId, reason }) => {
+    const release = await requireWritableAssignmentRelease(ctx, assignmentReleaseId);
+    const { organization, user } = await requireClassroomTeacher(ctx, release.classroomId);
+    const [student, enrollment, existing] = await Promise.all([
+      ctx.db.get(studentId),
+      ctx.db
+        .query("enrollments")
+        .withIndex("by_classroom_student", (index) =>
+          index.eq("classroomId", release.classroomId).eq("studentId", studentId),
+        )
+        .unique(),
+      ctx.db
+        .query("assignmentExcuses")
+        .withIndex("by_release_student", (index) =>
+          index.eq("assignmentReleaseId", assignmentReleaseId).eq("studentId", studentId),
+        )
+        .unique(),
+    ]);
+    if (!student || student.role !== "student" || !enrollment) throw new ConvexError("Forbidden");
+    const now = Date.now();
+    const excuseId = existing
+      ? existing._id
+      : await ctx.db.insert("assignmentExcuses", {
+          organizationId: organization._id,
+          assignmentReleaseId,
+          studentId,
+          reason: cleanReason(reason),
+          setBy: user._id,
+          createdAt: now,
+          updatedAt: now,
+        });
+    if (existing) {
+      await ctx.db.patch(existing._id, {
+        reason: cleanReason(reason),
+        setBy: user._id,
+        updatedAt: now,
+      });
+    }
+    await appendAuditEvent(ctx, {
+      organizationId: organization._id,
+      actor: { kind: "user", userId: user._id },
+      action: existing ? "assignment_excuse.updated" : "assignment_excuse.set",
+      target: { kind: "assignment_excuse", id: excuseId },
+    });
+    return excuseId;
+  },
+});
+
+export const clearExcuse = mutation({
+  args: { assignmentReleaseId: v.id("assignmentReleases"), studentId: v.id("users") },
+  handler: async (ctx, { assignmentReleaseId, studentId }) => {
+    const release = await requireWritableAssignmentRelease(ctx, assignmentReleaseId);
+    const { organization, user } = await requireClassroomTeacher(ctx, release.classroomId);
+    const excuse = await ctx.db
+      .query("assignmentExcuses")
+      .withIndex("by_release_student", (index) =>
+        index.eq("assignmentReleaseId", assignmentReleaseId).eq("studentId", studentId),
+      )
+      .unique();
+    if (!excuse) return;
+    await appendAuditEvent(ctx, {
+      organizationId: organization._id,
+      actor: { kind: "user", userId: user._id },
+      action: "assignment_excuse.cleared",
+      target: { kind: "assignment_excuse", id: excuse._id },
+    });
+    await ctx.db.delete(excuse._id);
+  },
+});
+
+export const listClassrooms = query({
+  args: {},
+  handler: async (ctx) => {
+    const { user } = await requireRole(ctx, "teacher");
+    const assignments = await ctx.db
+      .query("classroomTeachers")
+      .withIndex("by_teacher", (index) => index.eq("teacherId", user._id))
+      .collect();
+    const classrooms = await Promise.all(
+      assignments.map(async ({ classroomId }) => {
+        const classroom = await ctx.db.get(classroomId);
+        if (!classroom) return null;
+        const course = await ctx.db.get(classroom.courseId);
+        if (!course) throw new ConvexError("Classroom Course is unavailable");
+        return {
+          _id: classroom._id,
+          name: classroom.name,
+          courseName: course.name,
+          archived: classroom.archivedAt !== undefined || course.archivedAt !== undefined,
+        };
+      }),
+    );
+    return classrooms
+      .filter((classroom) => classroom !== null)
+      .sort(
+        (left, right) =>
+          Number(left.archived) - Number(right.archived) || left.name.localeCompare(right.name),
+      );
+  },
+});

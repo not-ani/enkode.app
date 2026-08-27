@@ -1,88 +1,59 @@
-# Welcome to your Convex functions directory!
+# Enkode backend
 
-Write your Convex functions here.
-See https://docs.convex.dev/functions for more.
+Convex is Enkode's required transactional backend. Configure the usual Better Auth variables plus a long, random `DEVELOPER_PROVISIONING_SECRET` in the Convex deployment.
 
-A query function that takes two arguments looks like:
+## Provision the first Teacher
 
-```ts
-// convex/myFunctions.ts
-import { query } from "./_generated/server";
-import { v } from "convex/values";
+Developers create an Organization and its first Teacher through the protected HTTP operation. The password is sent directly to Better Auth and is never stored in Enkode's domain tables or returned by the operation.
 
-export const myQueryFunction = query({
-  // Validators for arguments.
-  args: {
-    first: v.number(),
-    second: v.string(),
-  },
-
-  // Function implementation.
-  handler: async (ctx, args) => {
-    // Read the database as many times as you need here.
-    // See https://docs.convex.dev/database/reading-data.
-    const documents = await ctx.db.query("tablename").collect();
-
-    // Arguments passed from the client are properties of the args object.
-    console.log(args.first, args.second);
-
-    // Write arbitrary JavaScript here: filter, aggregate, build derived data,
-    // remove non-public properties, or create new objects.
-    return documents;
-  },
-});
+```sh
+curl "$CONVEX_SITE_URL/api/developer/provision-organization" \
+  --request POST \
+  --header "Authorization: Bearer $DEVELOPER_PROVISIONING_SECRET" \
+  --header "Content-Type: application/json" \
+  --data '{
+    "organization": { "name": "Example Academy", "slug": "example-academy" },
+    "teacher": {
+      "name": "Ada Lovelace",
+      "username": "ada",
+      "email": "ada@example.edu",
+      "password": "replace-with-a-strong-password"
+    }
+  }'
 ```
 
-Using this query function in a React component looks like:
+The operation is intentionally absent from the web application. Public Better Auth email signup remains disabled at the backend route; provisioned users sign in with the credential a developer or Teacher issued.
 
-```ts
-const data = useQuery(api.myFunctions.myQueryFunction, {
-  first: 10,
-  second: "hello",
-});
+## Organization Export
+
+An authorized developer can request the versioned portable export documented in
+`docs/internals/organization-export-v1.md`:
+
+```sh
+curl "$CONVEX_SITE_URL/api/developer/export-organization" \
+  --request POST \
+  --header "Authorization: Bearer $DEVELOPER_PROVISIONING_SECRET" \
+  --header "Content-Type: application/json" \
+  --data '{"organizationSlug":"example-academy"}' \
+  --output example-academy-enkode-export-v1.json
 ```
 
-A mutation function looks like:
+## Material attachments
 
-```ts
-// convex/myFunctions.ts
-import { mutation } from "./_generated/server";
-import { v } from "convex/values";
+Configure `ENKODE_OBJECT_STORAGE_PROVIDER` and `ENKODE_OBJECT_STORAGE_BUCKET` in the Convex deployment before registering file Materials. The configured upload adapter stores the bytes outside Convex, then passes a provider-neutral receipt containing the object key, original filename, content type, byte size, and SHA-256 digest to Material authoring. Enkode retains that receipt with the immutable Material Version so the attachment can be verified and exported without depending on one storage vendor.
 
-export const myMutationFunction = mutation({
-  // Validators for arguments.
-  args: {
-    first: v.string(),
-    second: v.string(),
-  },
+## Work History and Submission object storage
 
-  // Function implementation.
-  handler: async (ctx, args) => {
-    // Insert or modify documents in the database here.
-    // Mutations can also read from the database like queries.
-    // See https://docs.convex.dev/database/writing-data.
-    const message = { body: args.first, author: args.second };
-    const id = await ctx.db.insert("messages", message);
+Work History manifests, contiguous acknowledgements, and Submission metadata live in Convex. Compressed immutable history chunks, history snapshots, and explicitly submitted multi-file snapshots use path-style S3-compatible object storage configured in the Convex deployment:
 
-    // Optionally, return a value from your mutation.
-    return await ctx.db.get("messages", id);
-  },
-});
-```
+- `ENKODE_OBJECT_STORAGE_ENDPOINT`
+- `ENKODE_OBJECT_STORAGE_BUCKET`
+- `ENKODE_OBJECT_STORAGE_REGION`
+- `ENKODE_OBJECT_STORAGE_ACCESS_KEY_ID`
+- `ENKODE_OBJECT_STORAGE_SECRET_ACCESS_KEY`
 
-Using this mutation function in a React component looks like:
+The configured credentials need permission to put objects in the bucket. Enkode uses conditional, content-addressed writes so reconnect and orphan-reconciliation retries cannot replace prior history.
 
-```ts
-const mutation = useMutation(api.myFunctions.myMutationFunction);
-function handleButtonPress() {
-  // fire and forget, the most common way to use mutations
-  mutation({ first: "Hello!", second: "me" });
-  // OR
-  // use the result once the mutation has completed
-  mutation({ first: "Hello!", second: "me" }).then((result) => console.log(result));
-}
-```
+## Python execution
 
-Use the Convex CLI to push your functions to a deployment. See everything
-the Convex CLI can do by running `npx convex -h` in your project root
-directory. To learn more, launch the docs with `npx convex docs`.
+Hosted Enkode sends Run requests to `https://execute.enkode.app`. Fork operators may set `ENKODE_EXECUTION_ENDPOINT` in their Convex deployment to use another engineer-man/Piston-compatible service. The endpoint must expose `/api/v2/execute`; Enkode supplies the exactly pinned Assignment Version runtime and controls timeouts, entrypoints, and public-test harnesses.

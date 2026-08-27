@@ -29,6 +29,16 @@ export interface RouterAppContext {
 }
 
 export const Route = createRootRouteWithContext<RouterAppContext>()({
+  beforeLoad: async (ctx) => {
+    const token = await getAuth();
+    if (token) {
+      ctx.context.convexQueryClient.serverHttpClient?.setAuth(token);
+    }
+    return {
+      isAuthenticated: !!token,
+      token,
+    };
+  },
   head: () => ({
     meta: [
       {
@@ -39,7 +49,7 @@ export const Route = createRootRouteWithContext<RouterAppContext>()({
         content: "width=device-width, initial-scale=1",
       },
       {
-        title: "My App",
+        title: "Enkode",
       },
     ],
     links: [
@@ -51,16 +61,6 @@ export const Route = createRootRouteWithContext<RouterAppContext>()({
   }),
 
   component: RootDocument,
-  beforeLoad: async (ctx) => {
-    const token = await getAuth();
-    if (token) {
-      ctx.context.convexQueryClient.serverHttpClient?.setAuth(token);
-    }
-    return {
-      isAuthenticated: !!token,
-      token,
-    };
-  },
 });
 
 function RootDocument() {
@@ -71,12 +71,12 @@ function RootDocument() {
       authClient={authClient}
       initialToken={context.token}
     >
-      <html lang="en" className="dark">
+      <html lang="en" className="dark antialiased">
         <head>
           <HeadContent />
         </head>
         <body>
-          <div className="grid h-svh grid-rows-[auto_1fr]">
+          <div className="isolate grid h-svh grid-rows-[auto_1fr]">
             <Header />
             <Outlet />
           </div>

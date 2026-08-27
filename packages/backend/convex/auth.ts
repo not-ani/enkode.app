@@ -1,23 +1,28 @@
 import { createClient, type GenericCtx } from "@convex-dev/better-auth";
 import { convex } from "@convex-dev/better-auth/plugins";
 import { betterAuth } from "better-auth/minimal";
+import { admin } from "better-auth/plugins";
+import { adminAc } from "better-auth/plugins/admin/access";
 
 import { components } from "./_generated/api";
 import type { DataModel } from "./_generated/dataModel";
-import { query } from "./_generated/server";
 import authConfig from "./auth.config";
-
-const siteUrl = process.env.SITE_URL!;
 
 export const authComponent = createClient<DataModel>(components.betterAuth);
 
-function createAuth(ctx: GenericCtx<DataModel>) {
-  return betterAuth({
+function authOptions(ctx: GenericCtx<DataModel>, disableSignUp: boolean) {
+  const siteUrl = process.env.SITE_URL;
+  if (!siteUrl) {
+    throw new Error("SITE_URL is not configured");
+  }
+
+  return {
     baseURL: siteUrl,
     trustedOrigins: [siteUrl],
     database: authComponent.adapter(ctx),
     emailAndPassword: {
       enabled: true,
+      disableSignUp,
       requireEmailVerification: false,
     },
     plugins: [
@@ -26,14 +31,27 @@ function createAuth(ctx: GenericCtx<DataModel>) {
         jwksRotateOnTokenGenerationError: true,
       }),
     ],
-  });
+  };
 }
 
-export { createAuth };
+export function createAuth(ctx: GenericCtx<DataModel>) {
+  return betterAuth(authOptions(ctx, true));
+}
 
-export const getCurrentUser = query({
-  args: {},
-  handler: async (ctx) => {
-    return await authComponent.safeGetAuthUser(ctx);
-  },
-});
+export function createProvisioningAuth(ctx: GenericCtx<DataModel>) {
+  return betterAuth(authOptions(ctx, false));
+}
+
+export function createCredentialAdminAuth(ctx: GenericCtx<DataModel>) {
+  const options = authOptions(ctx, true);
+  return betterAuth({
+    ...options,
+    plugins: [
+      ...options.plugins,
+      admin({
+        adminRoles: ["user"],
+        roles: { user: adminAc },
+      }),
+    ],
+  });
+}

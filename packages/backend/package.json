@@ -5,8 +5,10 @@
   "license": "ISC",
   "author": "",
   "scripts": {
+    "check-types": "tsc -p convex --noEmit",
     "dev": "convex dev",
-    "dev:setup": "convex dev --configure --until-success"
+    "dev:setup": "convex dev --configure --until-success",
+    "test": "vitest run"
   },
   "dependencies": {
     "@convex-dev/better-auth": "catalog:",
@@ -18,6 +20,9 @@
   "devDependencies": {
     "@enkode.app/config": "workspace:*",
     "@types/node": "^24.13.3",
-    "typescript": "catalog:"
+    "ajv": "^8.20.0",
+    "convex-test": "0.0.51",
+    "typescript": "catalog:",
+    "vitest": "^4.1.11"
   }
 }

@@ -7,21 +7,26 @@ import { toast } from "sonner";
 import z from "zod";
 
 import { authClient } from "@/lib/auth-client";
+import { studentCredentialEmail } from "@enkode.app/backend/convex/studentCredentials";
 
-export default function SignInForm({ onSwitchToSignUp }: { onSwitchToSignUp: () => void }) {
+export default function SignInForm() {
   const navigate = useNavigate({
     from: "/",
   });
 
   const form = useForm({
     defaultValues: {
-      email: "",
+      identifier: "",
+      organization: "",
       password: "",
     },
     onSubmit: async ({ value }) => {
+      const email = value.organization
+        ? studentCredentialEmail(value.organization.trim().toLowerCase(), value.identifier)
+        : value.identifier.trim().toLowerCase();
       await authClient.signIn.email(
         {
-          email: value.email,
+          email,
           password: value.password,
         },
         {
@@ -38,16 +43,34 @@ export default function SignInForm({ onSwitchToSignUp }: { onSwitchToSignUp: () 
       );
     },
     validators: {
-      onSubmit: z.object({
-        email: z.email("Invalid email address"),
-        password: z.string().min(8, "Password must be at least 8 characters"),
-      }),
+      onSubmit: z
+        .object({
+          identifier: z.string().trim().min(1, "Email or username is required"),
+          organization: z.string().trim(),
+          password: z.string().min(8, "Password must be at least 8 characters"),
+        })
+        .refine(
+          ({ identifier, organization }) => organization || z.email().safeParse(identifier).success,
+          { message: "Enter a valid email or add your organization", path: ["identifier"] },
+        )
+        .refine(
+          ({ identifier, organization }) =>
+            !organization || /^[a-z0-9]+(?:[._-][a-z0-9]+)*$/.test(identifier),
+          { message: "Enter your organization username", path: ["identifier"] },
+        )
+        .refine(
+          ({ organization }) => !organization || /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(organization),
+          { message: "Enter the organization name from your teacher", path: ["organization"] },
+        ),
     },
   });
 
   return (
     <div className="mx-auto w-full mt-10 max-w-md p-6">
-      <h1 className="mb-6 text-center text-3xl font-bold">Welcome Back</h1>
+      <h1 className="mb-2 text-center text-3xl font-bold">Welcome back</h1>
+      <p className="text-muted-foreground mb-6 text-center text-sm">
+        Teachers use email. Students add their organization and username.
+      </p>
 
       <form
         onSubmit={(e) => {
@@ -58,14 +81,39 @@ export default function SignInForm({ onSwitchToSignUp }: { onSwitchToSignUp: () 
         className="space-y-4"
       >
         <div>
-          <form.Field name="email">
+          <form.Field name="organization">
             {(field) => (
               <div className="space-y-2">
-                <Label htmlFor={field.name}>Email</Label>
+                <Label htmlFor={field.name}>Organization</Label>
                 <Input
                   id={field.name}
                   name={field.name}
-                  type="email"
+                  placeholder="Students: example-academy"
+                  value={field.state.value}
+                  onBlur={field.handleBlur}
+                  onChange={(e) => field.handleChange(e.target.value)}
+                />
+                {field.state.meta.errors.map((error) => (
+                  <p key={error?.message} className="text-red-500">
+                    {error?.message}
+                  </p>
+                ))}
+              </div>
+            )}
+          </form.Field>
+        </div>
+
+        <div>
+          <form.Field name="identifier">
+            {(field) => (
+              <div className="space-y-2">
+                <Label htmlFor={field.name}>
+                  {form.state.values.organization ? "Username" : "Email"}
+                </Label>
+                <Input
+                  id={field.name}
+                  name={field.name}
+                  autoComplete="username"
                   value={field.state.value}
                   onBlur={field.handleBlur}
                   onChange={(e) => field.handleChange(e.target.value)}
@@ -89,6 +137,7 @@ export default function SignInForm({ onSwitchToSignUp }: { onSwitchToSignUp: () 
                   id={field.name}
                   name={field.name}
                   type="password"
+                  autoComplete="current-password"
                   value={field.state.value}
                   onBlur={field.handleBlur}
                   onChange={(e) => field.handleChange(e.target.value)}
@@ -114,15 +163,9 @@ export default function SignInForm({ onSwitchToSignUp }: { onSwitchToSignUp: () 
         </form.Subscribe>
       </form>
 
-      <div className="mt-4 text-center">
-        <Button
-          variant="link"
-          onClick={onSwitchToSignUp}
-          className="text-indigo-600 hover:text-indigo-800"
-        >
-          Need an account? Sign Up
-        </Button>
-      </div>
+      <p className="text-muted-foreground mt-4 text-center text-sm">
+        Need access? Ask your organization or teacher to provision your account.
+      </p>
     </div>
   );
 }
