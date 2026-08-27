@@ -110,6 +110,12 @@ function createLanguageService(language: WorkspaceLanguage): WorkspaceLanguageSe
   return new BrowserLocalLanguageService(language);
 }
 
+function observePaste(element: HTMLElement | null, listener: () => void) {
+  if (!element) return () => undefined;
+  element.addEventListener("paste", listener, true);
+  return () => element.removeEventListener("paste", listener, true);
+}
+
 export function useWorkspaceController({
   assignmentReleaseId,
   workspaceId,
@@ -233,8 +239,9 @@ export function useWorkspaceController({
 
   const mountEditor = useCallback<OnMount>((editor) => {
     const domNode = editor.getDomNode();
-    const observePaste = () => historyRecorder.current?.observeOrigin("paste");
-    domNode?.addEventListener("paste", observePaste, true);
+    const stopObservingPaste = observePaste(domNode, () =>
+      historyRecorder.current?.observeOrigin("paste"),
+    );
     const keyDisposable = editor.onKeyDown((event) => {
       const key = event.browserEvent.key.toLowerCase();
       if ((event.ctrlKey || event.metaKey) && key === "z") {
@@ -279,7 +286,7 @@ export function useWorkspaceController({
       return [() => (action.run = run)];
     });
     editor.onDidDispose(() => {
-      domNode?.removeEventListener("paste", observePaste, true);
+      stopObservingPaste();
       keyDisposable.dispose();
       changeDisposable.dispose();
       for (const restore of restoreActions) restore();
