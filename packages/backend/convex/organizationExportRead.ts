@@ -19,6 +19,7 @@ export const readOrganizationSnapshot = internalQuery({
       users,
       courses,
       courseCollaborators,
+      courseLibraryItems,
       assignments,
       assignmentVersions,
       assignmentStarterFiles,
@@ -32,6 +33,7 @@ export const readOrganizationSnapshot = internalQuery({
       assignmentReleases,
       assignmentReleaseAdoptions,
       deadlineExceptions,
+      assignmentExcuses,
       materialReleases,
       workspaces,
       workspaceVersionMerges,
@@ -59,6 +61,11 @@ export const readOrganizationSnapshot = internalQuery({
       scoped(
         ctx.db
           .query("courseCollaborators")
+          .withIndex("by_organization", (q) => q.eq("organizationId", organizationId)),
+      ),
+      scoped(
+        ctx.db
+          .query("courseLibraryItems")
           .withIndex("by_organization", (q) => q.eq("organizationId", organizationId)),
       ),
       scoped(
@@ -124,6 +131,11 @@ export const readOrganizationSnapshot = internalQuery({
       scoped(
         ctx.db
           .query("deadlineExceptions")
+          .withIndex("by_organization", (q) => q.eq("organizationId", organizationId)),
+      ),
+      scoped(
+        ctx.db
+          .query("assignmentExcuses")
           .withIndex("by_organization", (q) => q.eq("organizationId", organizationId)),
       ),
       scoped(
@@ -199,6 +211,7 @@ export const readOrganizationSnapshot = internalQuery({
         users,
         courses,
         courseCollaborators,
+        courseLibraryItems,
         assignments,
         assignmentVersions,
         assignmentStarterFiles,
@@ -212,6 +225,7 @@ export const readOrganizationSnapshot = internalQuery({
         assignmentReleases,
         assignmentReleaseAdoptions,
         deadlineExceptions,
+        assignmentExcuses,
         materialReleases,
         workspaces,
         workspaceVersionMerges,

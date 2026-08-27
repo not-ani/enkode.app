@@ -3,22 +3,14 @@
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const { mutate } = vi.hoisted(() => ({
+const { mutate, queryResult } = vi.hoisted(() => ({
   mutate: vi.fn(async () => ({ expiresAt: Date.now() + 45_000 })),
+  queryResult: { current: undefined as unknown },
 }));
 
 vi.mock("convex/react", () => ({
   useMutation: vi.fn(() => mutate),
-  useQuery: vi.fn(() => ({
-    files: [{ path: "main.py", content: "print('committed')\n" }],
-    updatedAt: 1,
-    assignmentTitle: "Greeting",
-    classroomName: "Period 1",
-    studentDisplayName: "Grace Student",
-    studentUsername: "grace",
-    entrypoint: "main.py",
-    runtimeVersion: "3.12.0",
-  })),
+  useQuery: vi.fn(() => queryResult.current),
 }));
 
 vi.mock("./workspace-monaco", () => ({
@@ -29,7 +21,7 @@ vi.mock("./workspace-monaco", () => ({
   ),
 }));
 
-import LiveWorkspaceViewer from "./live-workspace-viewer";
+import LiveWorkspaceViewer, { WorkspaceViewers } from "./live-workspace-viewer";
 
 describe("LiveWorkspaceViewer", () => {
   afterEach(() => {
@@ -38,6 +30,16 @@ describe("LiveWorkspaceViewer", () => {
   });
 
   it("renders committed files read-only and leaves presence when navigation unmounts it", async () => {
+    queryResult.current = {
+      files: [{ path: "main.py", content: "print('committed')\n" }],
+      updatedAt: 1,
+      assignmentTitle: "Greeting",
+      classroomName: "Period 1",
+      studentDisplayName: "Grace Student",
+      studentUsername: "grace",
+      entrypoint: "main.py",
+      runtimeVersion: "3.12.0",
+    };
     const view = render(<LiveWorkspaceViewer workspaceId="workspace-1" />);
 
     expect((await screen.findByTestId("monaco")).getAttribute("data-read-only")).toBe("true");
@@ -50,5 +52,21 @@ describe("LiveWorkspaceViewer", () => {
 
     view.unmount();
     await waitFor(() => expect(mutate.mock.calls.length).toBeGreaterThan(callsBeforeUnmount));
+  });
+
+  it("shows Students which Teachers are viewing Work History", () => {
+    queryResult.current = [
+      {
+        teacherId: "teacher-1",
+        displayName: "Ada Teacher",
+        viewKind: "work_history",
+      },
+    ];
+
+    render(<WorkspaceViewers workspaceId="workspace-1" />);
+
+    expect(screen.getByRole("status").textContent).toContain(
+      "Ada Teacher (Work History) is viewing your work.",
+    );
   });
 });

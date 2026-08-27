@@ -23,7 +23,8 @@ checked against that Organization again before serialization.
 - `format` is always `enkode.organization-export` and `version` is `1`.
 - `organization` identifies the only Organization in the bundle.
 - `records` contains users, teaching assignments, Courses, Classrooms, Enrollments, all Assignment
-  and Material Versions, source files and tests, releases and version adoptions, deadlines,
+  and Material Versions, their unified Course-library ordering, source files and tests, releases
+  and version adoptions, deadlines and explicit Assignment Excuses,
   Workspaces and merges, Runs, Submissions and snapshots, Grades and every returned revision,
   Feedback, Notifications (including read state), Integrity Signals (including similarity evidence),
   and Audit Events. Archived rows, ended Enrollments, and retained earlier versions are intentionally

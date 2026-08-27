@@ -5,6 +5,7 @@ import { useCallback } from "react";
 
 import WorkHistoryReplay from "@/components/work-history-replay";
 import IntegritySignalReview from "@/components/integrity-signal-review";
+import { WorkspaceViewers } from "@/components/live-workspace-viewer";
 import { useTeacherPresence } from "@/components/use-teacher-presence";
 
 export const Route = createFileRoute("/_auth/work-history/$workspaceId")({
@@ -58,6 +59,9 @@ function WorkHistoryRoute() {
             <p className="mt-1 text-sm text-destructive">{presence.error}</p>
           ) : null}
         </header>
+        {description.viewerRole === "student" ? (
+          <WorkspaceViewers workspaceId={workspaceId} />
+        ) : null}
         <WorkHistoryReplay committedThrough={description.committedThrough} loadPage={loadPage} />
         {description.viewerRole === "teacher" ? (
           signals ? (
