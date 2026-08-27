@@ -1,9 +1,13 @@
-import { api } from "@enkode.app/backend/convex/_generated/api";
+import { api } from "@/lib/convex-api";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useQuery } from "convex/react";
+import { Button } from "@enkode.app/ui/components/button";
+import { Input } from "@enkode.app/ui/components/input";
+import { useMutation, useQuery } from "convex/react";
+import { useState, type FormEvent } from "react";
 
 import { GradeEditor } from "@/components/grading";
-import { assignmentStatusLabel, type GradebookData } from "@/lib/gradebook";
+import { assignmentStatusLabel } from "@/lib/gradebook";
+import { messageFrom } from "@/lib/error-message";
 
 export const Route = createFileRoute(
   "/_auth/gradebook/$classroomId/$assignmentReleaseId/$studentId",
@@ -11,9 +15,10 @@ export const Route = createFileRoute(
 
 function GradebookCellRoute() {
   const { classroomId, assignmentReleaseId, studentId } = Route.useParams();
-  const gradebook = useQuery(api.gradebook.forClassroom, { classroomId }) as
-    | GradebookData
-    | undefined;
+  const gradebook = useQuery(api.gradebook.forClassroom, { classroomId });
+  const setExcuse = useMutation(api.gradebook.setExcuse);
+  const clearExcuse = useMutation(api.gradebook.clearExcuse);
+  const [excuseError, setExcuseError] = useState<string>();
   if (!gradebook) {
     return <main className="p-6 text-sm text-muted-foreground">Opening Gradebook cell…</main>;
   }
@@ -27,6 +32,29 @@ function GradebookCellRoute() {
   }
   const hasSubmission =
     cell.status === "submitted" || cell.status === "awaiting_review" || cell.status === "returned";
+
+  async function excuse(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setExcuseError(undefined);
+    try {
+      await setExcuse({
+        assignmentReleaseId,
+        studentId,
+        reason: String(new FormData(event.currentTarget).get("reason")),
+      });
+    } catch (error) {
+      setExcuseError(messageFrom(error, "Could not excuse this Assignment"));
+    }
+  }
+
+  async function clear() {
+    setExcuseError(undefined);
+    try {
+      await clearExcuse({ assignmentReleaseId, studentId });
+    } catch (error) {
+      setExcuseError(messageFrom(error, "Could not clear this excuse"));
+    }
+  }
 
   return (
     <main className="isolate overflow-y-auto py-8 sm:py-10">
@@ -67,10 +95,35 @@ function GradebookCellRoute() {
         ) : (
           <p className="border-y border-foreground/10 py-5 text-sm text-muted-foreground">
             {cell.status === "excused"
-              ? "This ended Enrollment has no academic record for this Assignment Release."
+              ? `This Student is excused${cell.excuseReason ? `: ${cell.excuseReason}` : "."}`
               : "This Student has not submitted this Assignment Release yet."}
           </p>
         )}
+        <section className="border-t border-foreground/10 pt-5">
+          <h2 className="font-medium">Assignment excuse</h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Excuses are explicit academic records and do not follow Enrollment access changes.
+          </p>
+          {cell.status === "excused" ? (
+            <Button
+              className="mt-3"
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => void clear()}
+            >
+              Clear excuse
+            </Button>
+          ) : (
+            <form className="mt-3 flex max-w-xl gap-2" onSubmit={excuse}>
+              <Input name="reason" aria-label="Excuse reason" placeholder="Optional reason" />
+              <Button type="submit" size="sm">
+                Excuse Assignment
+              </Button>
+            </form>
+          )}
+          {excuseError ? <p className="mt-2 text-sm text-destructive">{excuseError}</p> : null}
+        </section>
       </div>
     </main>
   );

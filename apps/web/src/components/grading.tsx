@@ -1,19 +1,15 @@
-import { api } from "@enkode.app/backend/convex/_generated/api";
+import { api } from "@/lib/convex-api";
 import { Button } from "@enkode.app/ui/components/button";
 import { Input } from "@enkode.app/ui/components/input";
 import { Textarea } from "@enkode.app/ui/components/textarea";
 import { useMutation, useQuery } from "convex/react";
+import type { FunctionReturnType } from "convex/server";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 
-type Classroom = { _id: string; name: string; courseName: string };
-export type QueueRow = {
-  assignmentReleaseId: string;
-  assignmentTitle: string;
-  studentId: string;
-  studentName: string;
-  attemptCount: number;
-  status: "submitted" | "awaiting_review" | "returned";
-};
+import { messageFrom } from "@/lib/error-message";
+
+type Classroom = FunctionReturnType<typeof api.classrooms.listMine>[number];
+export type QueueRow = FunctionReturnType<typeof api.grades.reviewQueue>[number];
 type InlineFeedback = {
   path: string;
   startLine: number;
@@ -22,32 +18,7 @@ type InlineFeedback = {
   endColumn: number;
   body: string;
 };
-type Attempt = {
-  _id: string;
-  attemptNumber: number;
-  assignmentVersion: number;
-  proposedPoints: number;
-  submittedAt: number;
-  snapshotFiles: { path: string; contentHash: string; byteLength: number }[];
-  testResults: { name: string; visibility: "public" | "hidden"; weight: number; passed: boolean }[];
-};
-type Review = {
-  releasePoints: number;
-  attempts: Attempt[];
-  grade?: {
-    _id: string;
-    submissionId: string;
-    points: number;
-    overallFeedback?: string;
-    inlineFeedback: InlineFeedback[];
-  };
-  returned?: { revision: number; returnedAt: number };
-  status: "submitted" | "awaiting_review" | "returned";
-};
-
-function messageFrom(error: unknown) {
-  return error instanceof Error ? error.message : "Could not save this Grade";
-}
+type Review = NonNullable<FunctionReturnType<typeof api.grades.review>>;
 
 export default function Grading({ classrooms }: { classrooms: Classroom[] }) {
   const [classroomId, setClassroomId] = useState(classrooms[0]?._id ?? "");
@@ -57,7 +28,7 @@ export default function Grading({ classrooms }: { classrooms: Classroom[] }) {
   const queue = useQuery(
     api.grades.reviewQueue,
     selectedClassroomId ? { classroomId: selectedClassroomId } : "skip",
-  ) as QueueRow[] | undefined;
+  );
   const [selection, setSelection] = useState<string>();
   const selected =
     queue?.find((row) => `${row.assignmentReleaseId}:${row.studentId}` === selection) ?? queue?.[0];
@@ -139,7 +110,7 @@ export function GradeEditor({ row }: { row: QueueRow }) {
   const review = useQuery(api.grades.review, {
     assignmentReleaseId: row.assignmentReleaseId,
     studentId: row.studentId,
-  }) as Review | undefined;
+  });
   if (!review) return <p className="text-sm text-muted-foreground">Loading review…</p>;
   return <GradeForm review={review} row={row} />;
 }
@@ -182,7 +153,7 @@ function GradeForm({ review, row }: { review: Review; row: QueueRow }) {
       await persist();
       setMessage("Grade draft saved privately.");
     } catch (error) {
-      setMessage(messageFrom(error));
+      setMessage(messageFrom(error, "Could not save this Grade"));
     } finally {
       setSaving(false);
     }
@@ -196,7 +167,7 @@ function GradeForm({ review, row }: { review: Review; row: QueueRow }) {
       await returnGrade({ gradeId });
       setMessage(review.returned ? "Revised Grade returned." : "Grade returned.");
     } catch (error) {
-      setMessage(messageFrom(error));
+      setMessage(messageFrom(error, "Could not save this Grade"));
     } finally {
       setSaving(false);
     }

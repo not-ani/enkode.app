@@ -273,3 +273,24 @@ export function objectStorageFromEnvironment(): ObjectStorage {
   }
   return new S3CompatibleObjectStorage({ endpoint, bucket, region, accessKeyId, secretAccessKey });
 }
+
+export async function uploadVerifiedObject(
+  storage: ObjectStorage,
+  input: { key: string; bytes: Uint8Array; filename: string; contentType: string },
+) {
+  const sha256 = createHash("sha256").update(input.bytes).digest("hex");
+  await storage.putImmutable({
+    key: input.key,
+    bytes: input.bytes,
+    contentType: input.contentType,
+    sha256,
+  });
+  await storage.getImmutable({ key: input.key, sha256, byteLength: input.bytes.byteLength });
+  return storage.completeUpload({
+    storageKey: input.key,
+    filename: input.filename,
+    contentType: input.contentType,
+    byteSize: input.bytes.byteLength,
+    sha256,
+  });
+}

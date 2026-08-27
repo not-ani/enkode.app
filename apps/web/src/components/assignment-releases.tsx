@@ -1,45 +1,29 @@
-import { api } from "@enkode.app/backend/convex/_generated/api";
+import { api } from "@/lib/convex-api";
 import { Button } from "@enkode.app/ui/components/button";
 import { Input } from "@enkode.app/ui/components/input";
 import { Link } from "@tanstack/react-router";
 import { useMutation, useQuery } from "convex/react";
+import type { FunctionReturnType } from "convex/server";
 import { useState, type FormEvent } from "react";
 
-type Classroom = { _id: string; name: string; courseName: string };
-type VersionOption = {
-  assignmentId: string;
-  assignmentTitle: string;
-  assignmentVersionId: string;
-  version: number;
-  language: "python" | "javascript" | "typescript" | "java";
-  runtimeVersion: string;
-};
+import { messageFrom } from "@/lib/error-message";
+
+import {
+  PublicationControl,
+  publicationFromForm,
+  type PublicationMode,
+} from "./publication-control";
+
+type Classroom = FunctionReturnType<typeof api.classrooms.listMine>[number];
+type VersionOption = FunctionReturnType<typeof api.assignmentReleases.availableVersions>[number];
 
 function languageName(language: VersionOption["language"]) {
   return { python: "Python", javascript: "JavaScript", typescript: "TypeScript", java: "Java" }[
     language
   ];
 }
-type Release = {
-  _id: string;
-  assignmentId: string;
-  assignmentTitle: string;
-  version: number;
-  latestVersion: number;
-  points: number;
-  publicationStatus: "draft" | "scheduled" | "published";
-  scheduledFor?: number;
-  publishedAt?: number;
-  submissionLimit?: number;
-  deadlinePolicy: DeadlinePolicy;
-  deadlineAt?: number;
-};
+type Release = FunctionReturnType<typeof api.assignmentReleases.listForClassroom>[number];
 type DeadlinePolicy = "no_deadline" | "accept_late" | "hard_close";
-type Enrollment = { studentId: string; displayName: string; status: "active" | "ended" };
-
-function messageFrom(error: unknown) {
-  return error instanceof Error ? error.message : "Could not release this Assignment";
-}
 
 export default function AssignmentReleases({ classrooms }: { classrooms: Classroom[] }) {
   const [classroomId, setClassroomId] = useState(classrooms[0]?._id ?? "");
@@ -47,20 +31,14 @@ export default function AssignmentReleases({ classrooms }: { classrooms: Classro
     ? classroomId
     : (classrooms[0]?._id ?? "");
   const queryArgs = selectedClassroomId ? { classroomId: selectedClassroomId } : "skip";
-  const versions = useQuery(api.assignmentReleases.availableVersions, queryArgs) as
-    | VersionOption[]
-    | undefined;
-  const releases = useQuery(api.assignmentReleases.listForClassroom, queryArgs) as
-    | Release[]
-    | undefined;
+  const versions = useQuery(api.assignmentReleases.availableVersions, queryArgs);
+  const releases = useQuery(api.assignmentReleases.listForClassroom, queryArgs);
   const createRelease = useMutation(api.assignmentReleases.create);
   const moveRelease = useMutation(api.assignmentReleases.move);
   const scheduleRelease = useMutation(api.assignmentReleases.schedule);
   const cancelSchedule = useMutation(api.assignmentReleases.cancelSchedule);
   const publishRelease = useMutation(api.assignmentReleases.publishNow);
-  const [publicationMode, setPublicationMode] = useState<"immediate" | "draft" | "scheduled">(
-    "immediate",
-  );
+  const [publicationMode, setPublicationMode] = useState<PublicationMode>("immediate");
   const [deadlineMode, setDeadlineMode] = useState<DeadlinePolicy>("no_deadline");
   const [error, setError] = useState<string>();
   const [saving, setSaving] = useState(false);
@@ -78,13 +56,7 @@ export default function AssignmentReleases({ classrooms }: { classrooms: Classro
         classroomId: selectedClassroomId,
         assignmentVersionId: String(form.get("assignmentVersionId")),
         points: Number(form.get("points")),
-        publication:
-          publicationMode === "scheduled"
-            ? {
-                mode: "scheduled",
-                scheduledFor: new Date(String(form.get("scheduledFor"))).getTime(),
-              }
-            : publicationMode,
+        publication: publicationFromForm(publicationMode, form),
         deadlinePolicy: deadlineMode,
         deadlineAt:
           deadlineMode === "no_deadline"
@@ -98,7 +70,7 @@ export default function AssignmentReleases({ classrooms }: { classrooms: Classro
       setPublicationMode("immediate");
       setDeadlineMode("no_deadline");
     } catch (caught) {
-      setError(messageFrom(caught));
+      setError(messageFrom(caught, "Could not release this Assignment"));
     } finally {
       setSaving(false);
     }
@@ -207,38 +179,8 @@ export default function AssignmentReleases({ classrooms }: { classrooms: Classro
                   className="w-28 max-sm:h-10 max-sm:text-base"
                 />
               </label>
-              <label className="flex flex-col gap-1.5 text-base sm:text-sm">
-                Publication
-                <select
-                  value={publicationMode}
-                  onChange={(event) =>
-                    setPublicationMode(event.target.value as typeof publicationMode)
-                  }
-                  className="border-input bg-background h-10 min-w-36 border px-2.5 text-base outline-none focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring/50 sm:h-8 sm:text-xs"
-                >
-                  <option value="immediate">Publish now</option>
-                  <option value="draft">Save as draft</option>
-                  <option value="scheduled">Schedule</option>
-                </select>
-              </label>
+              <PublicationControl mode={publicationMode} onChange={setPublicationMode} />
             </div>
-            {publicationMode === "scheduled" ? (
-              <label className="flex max-w-xs flex-col gap-1.5 text-base sm:text-sm">
-                Publish date and time
-                <Input
-                  name="scheduledFor"
-                  type="datetime-local"
-                  required
-                  className="max-sm:h-10 max-sm:text-base"
-                />
-                <span className="text-muted-foreground text-xs">
-                  Uses your device timezone:{" "}
-                  <span suppressHydrationWarning>
-                    {Intl.DateTimeFormat().resolvedOptions().timeZone}
-                  </span>
-                </span>
-              </label>
-            ) : null}
             <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
               <label className="flex flex-col gap-1.5 text-base sm:text-sm">
                 Deadline policy
@@ -389,25 +331,6 @@ export default function AssignmentReleases({ classrooms }: { classrooms: Classro
   );
 }
 
-type VersionPreview = {
-  version: number;
-  language: VersionOption["language"];
-  instructions: string;
-  runtimeVersion: string;
-  entrypoint: string;
-  evaluationTests: { name: string; visibility: "public" | "hidden"; weight: number }[];
-};
-type AdoptionPreview = {
-  fromVersion: VersionPreview;
-  toVersion: VersionPreview;
-  changedStarterFiles: {
-    path: string;
-    kind: "added" | "modified" | "removed";
-    previousContent?: string;
-    incomingContent?: string;
-  }[];
-};
-
 function VersionAdoption({ release, versions }: { release: Release; versions: VersionOption[] }) {
   const newer = versions.filter(
     (version) => version.assignmentId === release.assignmentId && version.version > release.version,
@@ -416,7 +339,7 @@ function VersionAdoption({ release, versions }: { release: Release; versions: Ve
   const preview = useQuery(
     api.assignmentReleases.previewAdoption,
     targetId ? { assignmentReleaseId: release._id, assignmentVersionId: targetId } : "skip",
-  ) as AdoptionPreview | undefined;
+  );
   const adopt = useMutation(api.assignmentReleases.adoptVersion);
   const [adopting, setAdopting] = useState(false);
   const [error, setError] = useState<string>();
@@ -549,17 +472,8 @@ function VersionAdoption({ release, versions }: { release: Release; versions: Ve
   );
 }
 
-type StudentRelease = Release & {
-  classroomName: string;
-  language: VersionOption["language"];
-  runtimeVersion: string;
-  effectiveDeadline: { deadlineAt?: number };
-  submissionEligibility: { canSubmit: boolean; reason?: string; remainingAttempts?: number };
-  deadlineFacts: { missing: boolean; late: boolean };
-};
-
 export function StudentAssignmentReleases() {
-  const releases = useQuery(api.assignmentReleases.listMine) as StudentRelease[] | undefined;
+  const releases = useQuery(api.assignmentReleases.listMine);
 
   return (
     <section className="mt-8 flex max-w-2xl flex-col gap-3">
@@ -603,20 +517,10 @@ export function StudentAssignmentReleases() {
 }
 
 function ReleasePolicyEditor({ release, classroomId }: { release: Release; classroomId: string }) {
-  const enrollments = useQuery(api.enrollments.listForClassroom, { classroomId }) as
-    | Enrollment[]
-    | undefined;
+  const enrollments = useQuery(api.enrollments.listForClassroom, { classroomId });
   const exceptions = useQuery(api.assignmentReleases.listDeadlineExceptions, {
     assignmentReleaseId: release._id,
-  }) as
-    | {
-        _id: string;
-        studentId: string;
-        studentName: string;
-        deadlinePolicy: DeadlinePolicy;
-        deadlineAt?: number;
-      }[]
-    | undefined;
+  });
   const configure = useMutation(api.assignmentReleases.configureSubmissionPolicy);
   const setException = useMutation(api.assignmentReleases.setDeadlineException);
   const removeException = useMutation(api.assignmentReleases.removeDeadlineException);

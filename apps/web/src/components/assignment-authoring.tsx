@@ -1,13 +1,16 @@
-import { api } from "@enkode.app/backend/convex/_generated/api";
+import { api } from "@/lib/convex-api";
 import { Button } from "@enkode.app/ui/components/button";
 import { Input } from "@enkode.app/ui/components/input";
 import { Textarea } from "@enkode.app/ui/components/textarea";
 import { useMutation, useQuery } from "convex/react";
+import type { FunctionReturnType } from "convex/server";
 import { useState, type FormEvent } from "react";
+
+import { messageFrom } from "@/lib/error-message";
 
 import ArchiveActions from "./archive-actions";
 
-type AssignmentSummary = { _id: string; title: string; latestVersion: number };
+type AssignmentSummary = FunctionReturnType<typeof api.assignments.listByCourse>[number];
 type Language = "python" | "javascript" | "typescript" | "java";
 type TestKind =
   | "input_output"
@@ -15,7 +18,6 @@ type TestKind =
   | "javascript_harness"
   | "typescript_harness"
   | "java_harness";
-type Runtime = { language: Language; version: string };
 type Visibility = "public" | "hidden";
 type StarterFile = { id: string; path: string; content: string };
 type EvaluationTest = {
@@ -88,12 +90,8 @@ function initialDraft(language: Language = "python") {
 }
 
 export default function AssignmentAuthoring({ courseId }: { courseId: string }) {
-  const assignments = useQuery(api.assignments.listByCourse, { courseId }) as
-    | AssignmentSummary[]
-    | undefined;
-  const runtimes = useQuery(api.assignments.supportedRuntimes, { courseId }) as
-    | Runtime[]
-    | undefined;
+  const assignments = useQuery(api.assignments.listByCourse, { courseId });
+  const runtimes = useQuery(api.assignments.supportedRuntimes, { courseId });
   const createAssignment = useMutation(api.assignments.create);
   const createVersion = useMutation(api.assignments.createVersion);
   const [draft, setDraft] = useState(initialDraft);
@@ -147,7 +145,7 @@ export default function AssignmentAuthoring({ courseId }: { courseId: string }) 
       setVersioning(undefined);
       setAuthoring(false);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not save Assignment Version");
+      setError(messageFrom(caught, "Could not save Assignment Version"));
     } finally {
       setSaving(false);
     }

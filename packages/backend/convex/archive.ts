@@ -124,6 +124,11 @@ export const deleteAssignmentDraft = mutation({
       for (const test of tests) await ctx.db.delete(test._id);
       await ctx.db.delete(version._id);
     }
+    const libraryItem = await ctx.db
+      .query("courseLibraryItems")
+      .withIndex("by_assignment", (index) => index.eq("assignmentId", assignmentId))
+      .unique();
+    if (libraryItem) await ctx.db.delete(libraryItem._id);
     await audit(ctx, organization._id, user._id, "assignment", assignmentId, "deleted");
     await ctx.db.delete(assignmentId);
   },
@@ -154,6 +159,11 @@ export const deleteMaterialDraft = mutation({
       if (version.attachmentId) await ctx.db.delete(version.attachmentId);
       await ctx.db.delete(version._id);
     }
+    const libraryItem = await ctx.db
+      .query("courseLibraryItems")
+      .withIndex("by_material", (index) => index.eq("materialId", materialId))
+      .unique();
+    if (libraryItem) await ctx.db.delete(libraryItem._id);
     await audit(ctx, organization._id, user._id, "material", materialId, "deleted");
     await ctx.db.delete(materialId);
   },
@@ -245,10 +255,13 @@ export const listArchived = query({
     ]);
     const courses = (
       await Promise.all(courseLinks.map(({ courseId }) => ctx.db.get(courseId)))
-    ).filter((course) => course?.archivedAt !== undefined);
+    ).filter((course): course is NonNullable<typeof course> => course?.archivedAt !== undefined);
     const classrooms = (
       await Promise.all(classroomLinks.map(({ classroomId }) => ctx.db.get(classroomId)))
-    ).filter((classroom) => classroom?.archivedAt !== undefined);
+    ).filter(
+      (classroom): classroom is NonNullable<typeof classroom> =>
+        classroom?.archivedAt !== undefined,
+    );
     const courseIds = courseLinks.map(({ courseId }) => courseId);
     const [assignmentGroups, materialGroups] = await Promise.all([
       Promise.all(

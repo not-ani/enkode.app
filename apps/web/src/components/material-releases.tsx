@@ -1,51 +1,31 @@
-import { api } from "@enkode.app/backend/convex/_generated/api";
+import { api } from "@/lib/convex-api";
 import { Button } from "@enkode.app/ui/components/button";
-import { Input } from "@enkode.app/ui/components/input";
 import { useMutation, useQuery } from "convex/react";
+import type { FunctionReturnType } from "convex/server";
 import { useState, type FormEvent } from "react";
 
-type Classroom = { _id: string; name: string; courseName: string };
-type VersionOption = {
-  materialId: string;
-  materialTitle: string;
-  materialVersionId: string;
-  version: number;
-  kind: "rich_text" | "external_link" | "file";
-};
-type Release = {
-  _id: string;
-  materialId: string;
-  materialVersionId: string;
-  materialTitle: string;
-  version: number;
-  kind: VersionOption["kind"];
-  publicationStatus: "draft" | "scheduled" | "published";
-  scheduledFor?: number;
-};
+import { messageFrom } from "@/lib/error-message";
 
-function messageFrom(error: unknown) {
-  return error instanceof Error ? error.message : "Could not update this Material Release";
-}
+import {
+  PublicationControl,
+  publicationFromForm,
+  type PublicationMode,
+} from "./publication-control";
 
+type Classroom = FunctionReturnType<typeof api.classrooms.listMine>[number];
 export default function MaterialReleases({ classrooms }: { classrooms: Classroom[] }) {
   const [classroomId, setClassroomId] = useState(classrooms[0]?._id ?? "");
   const selectedClassroomId = classrooms.some(({ _id }) => _id === classroomId)
     ? classroomId
     : (classrooms[0]?._id ?? "");
   const queryArgs = selectedClassroomId ? { classroomId: selectedClassroomId } : "skip";
-  const versions = useQuery(api.materialReleases.availableVersions, queryArgs) as
-    | VersionOption[]
-    | undefined;
-  const releases = useQuery(api.materialReleases.listForClassroom, queryArgs) as
-    | Release[]
-    | undefined;
+  const versions = useQuery(api.materialReleases.availableVersions, queryArgs);
+  const releases = useQuery(api.materialReleases.listForClassroom, queryArgs);
   const createRelease = useMutation(api.materialReleases.create);
   const adoptVersion = useMutation(api.materialReleases.adoptVersion);
   const moveRelease = useMutation(api.materialReleases.move);
   const publishRelease = useMutation(api.materialReleases.publishNow);
-  const [publicationMode, setPublicationMode] = useState<"immediate" | "draft" | "scheduled">(
-    "immediate",
-  );
+  const [publicationMode, setPublicationMode] = useState<PublicationMode>("immediate");
   const [error, setError] = useState<string>();
 
   const available = versions?.filter(
@@ -60,13 +40,7 @@ export default function MaterialReleases({ classrooms }: { classrooms: Classroom
       await createRelease({
         classroomId: selectedClassroomId,
         materialVersionId: String(form.get("materialVersionId")),
-        publication:
-          publicationMode === "scheduled"
-            ? {
-                mode: "scheduled",
-                scheduledFor: new Date(String(form.get("scheduledFor"))).getTime(),
-              }
-            : publicationMode,
+        publication: publicationFromForm(publicationMode, form),
       });
       event.currentTarget.reset();
       setPublicationMode("immediate");
@@ -145,24 +119,8 @@ export default function MaterialReleases({ classrooms }: { classrooms: Classroom
                   ))}
                 </select>
               </label>
-              <label className="flex flex-col gap-1 text-base sm:text-sm">
-                Publication
-                <select
-                  value={publicationMode}
-                  onChange={(event) =>
-                    setPublicationMode(event.target.value as typeof publicationMode)
-                  }
-                  className="border-input bg-background h-10 border px-2.5 text-base sm:h-8 sm:text-xs"
-                >
-                  <option value="immediate">Publish now</option>
-                  <option value="draft">Save as draft</option>
-                  <option value="scheduled">Schedule</option>
-                </select>
-              </label>
+              <PublicationControl mode={publicationMode} onChange={setPublicationMode} />
             </div>
-            {publicationMode === "scheduled" ? (
-              <Input name="scheduledFor" type="datetime-local" required className="max-w-xs" />
-            ) : null}
             <Button type="submit" size="sm" className="self-start" disabled={!available?.length}>
               Release Material
             </Button>
@@ -261,17 +219,10 @@ export default function MaterialReleases({ classrooms }: { classrooms: Classroom
   );
 }
 
-type StudentMaterial = Release & { classroomName: string };
-type OpenMaterial = StudentMaterial & {
-  richText?: string;
-  externalUrl?: string;
-  attachment?: { filename: string; contentType: string; byteSize: number };
-};
+type StudentMaterial = FunctionReturnType<typeof api.materialReleases.listMine>[number];
 
 function StudentMaterialItem({ material }: { material: StudentMaterial }) {
-  const opened = useQuery(api.materialReleases.open, { materialReleaseId: material._id }) as
-    | OpenMaterial
-    | undefined;
+  const opened = useQuery(api.materialReleases.open, { materialReleaseId: material._id });
   return (
     <li className="flex flex-col gap-2 py-4">
       <p className="font-medium">{material.materialTitle}</p>
@@ -300,7 +251,7 @@ function StudentMaterialItem({ material }: { material: StudentMaterial }) {
 }
 
 export function StudentMaterials() {
-  const materials = useQuery(api.materialReleases.listMine) as StudentMaterial[] | undefined;
+  const materials = useQuery(api.materialReleases.listMine);
   return (
     <section className="mt-8 flex max-w-2xl flex-col gap-3">
       <h2 className="text-xl font-semibold">Materials</h2>

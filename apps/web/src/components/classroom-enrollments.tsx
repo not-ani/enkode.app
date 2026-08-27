@@ -1,21 +1,13 @@
-import { api } from "@enkode.app/backend/convex/_generated/api";
+import { api } from "@/lib/convex-api";
 import { Button } from "@enkode.app/ui/components/button";
 import { useMutation, useQuery } from "convex/react";
+import type { FunctionReturnType } from "convex/server";
 import { useState, type FormEvent } from "react";
 
-type Classroom = { _id: string; name: string; courseName: string };
-type Student = { id: string; displayName: string; username: string };
-type Enrollment = {
-  id: string;
-  studentId: string;
-  displayName: string;
-  username: string;
-  status: "active" | "ended";
-};
+import { messageFrom } from "@/lib/error-message";
 
-function messageFrom(error: unknown) {
-  return error instanceof Error ? error.message : "Could not update the Enrollment.";
-}
+type Classroom = FunctionReturnType<typeof api.classrooms.listMine>[number];
+type Enrollment = FunctionReturnType<typeof api.enrollments.listForClassroom>[number];
 
 export default function ClassroomEnrollments({ classrooms }: { classrooms: Classroom[] }) {
   const [classroomId, setClassroomId] = useState(classrooms[0]?._id ?? "");
@@ -23,11 +15,11 @@ export default function ClassroomEnrollments({ classrooms }: { classrooms: Class
   const selectedClassroomId = classrooms.some((classroom) => classroom._id === classroomId)
     ? classroomId
     : (classrooms[0]?._id ?? "");
-  const students = useQuery(api.students.list) as Student[] | undefined;
+  const students = useQuery(api.students.list);
   const enrollments = useQuery(
     api.enrollments.listForClassroom,
     selectedClassroomId ? { classroomId: selectedClassroomId } : "skip",
-  ) as Enrollment[] | undefined;
+  );
   const enroll = useMutation(api.enrollments.enroll);
   const end = useMutation(api.enrollments.end);
   const restore = useMutation(api.enrollments.restore);
@@ -43,7 +35,7 @@ export default function ClassroomEnrollments({ classrooms }: { classrooms: Class
       await enroll({ classroomId: selectedClassroomId, studentId: String(form.get("studentId")) });
       event.currentTarget.reset();
     } catch (caught) {
-      setError(messageFrom(caught));
+      setError(messageFrom(caught, "Could not update the Enrollment."));
     }
   }
 
@@ -53,7 +45,7 @@ export default function ClassroomEnrollments({ classrooms }: { classrooms: Class
       if (enrollment.status === "active") await end({ enrollmentId: enrollment.id });
       else await restore({ enrollmentId: enrollment.id });
     } catch (caught) {
-      setError(messageFrom(caught));
+      setError(messageFrom(caught, "Could not update the Enrollment."));
     }
   }
 

@@ -1,42 +1,34 @@
-import { api } from "@enkode.app/backend/convex/_generated/api";
+import { api } from "@/lib/convex-api";
 import { Button } from "@enkode.app/ui/components/button";
 import { Input } from "@enkode.app/ui/components/input";
 import { Textarea } from "@enkode.app/ui/components/textarea";
-import { useMutation, useQuery } from "convex/react";
+import { useAction, useMutation, useQuery } from "convex/react";
 import { useState, type FormEvent } from "react";
 
 import ArchiveActions from "./archive-actions";
+import { messageFrom } from "@/lib/error-message";
 
-type Material = { _id: string; title: string; latestVersion: number };
 type MaterialKind = "rich_text" | "external_link" | "file";
 
-function messageFrom(error: unknown) {
-  return error instanceof Error ? error.message : "Could not save this Material";
-}
-
-function contentFrom(form: FormData, kind: MaterialKind) {
+function contentFrom(form: FormData, kind: MaterialKind, attachmentId?: string) {
   if (kind === "rich_text") {
     return { kind, richText: String(form.get("richText")) } as const;
   }
   if (kind === "external_link") {
     return { kind, externalUrl: String(form.get("externalUrl")) } as const;
   }
+  if (!attachmentId) throw new Error("Choose a file to upload");
   return {
     kind,
-    attachment: {
-      storageKey: String(form.get("storageKey")),
-      filename: String(form.get("filename")),
-      contentType: String(form.get("contentType")),
-      byteSize: Number(form.get("byteSize")),
-      sha256: String(form.get("sha256")),
-    },
+    attachmentId,
   } as const;
 }
 
 export default function MaterialAuthoring({ courseId }: { courseId: string }) {
-  const materials = useQuery(api.materials.listByCourse, { courseId }) as Material[] | undefined;
+  const materials = useQuery(api.materials.listByCourse, { courseId });
   const createMaterial = useMutation(api.materials.create);
   const createVersion = useMutation(api.materials.createVersion);
+  const uploadAttachment = useAction(api.materialUpload.upload);
   const [kind, setKind] = useState<MaterialKind>("rich_text");
   const [versionOf, setVersionOf] = useState("");
   const [saving, setSaving] = useState(false);
@@ -48,14 +40,25 @@ export default function MaterialAuthoring({ courseId }: { courseId: string }) {
     setError(undefined);
     const form = new FormData(event.currentTarget);
     try {
-      const content = contentFrom(form, kind);
+      const file = form.get("attachment");
+      const uploaded =
+        kind === "file" && file instanceof File
+          ? await uploadAttachment({
+              courseId,
+              filename: file.name,
+              contentType: file.type || "application/octet-stream",
+              bytes: await file.arrayBuffer(),
+            })
+          : undefined;
+      if (kind === "file" && !uploaded) throw new Error("Choose a file to upload");
+      const content = contentFrom(form, kind, uploaded?.attachmentId);
       if (versionOf) await createVersion({ materialId: versionOf, content });
       else await createMaterial({ courseId, title: String(form.get("title")), content });
       event.currentTarget.reset();
       setKind("rich_text");
       setVersionOf("");
     } catch (caught) {
-      setError(messageFrom(caught));
+      setError(messageFrom(caught, "Could not save this Material"));
     } finally {
       setSaving(false);
     }
@@ -123,23 +126,13 @@ export default function MaterialAuthoring({ courseId }: { courseId: string }) {
             <Input name="externalUrl" type="url" required placeholder="https://…" />
           </label>
         ) : (
-          <fieldset className="grid gap-2 @md:grid-cols-2">
-            <legend className="col-span-full mb-1 text-sm font-medium">
-              Completed object-storage upload receipt
-            </legend>
-            <Input name="storageKey" required placeholder="Object key" />
-            <Input name="filename" required placeholder="File name" />
-            <Input name="contentType" required placeholder="Content type" />
-            <Input name="byteSize" type="number" min="0" step="1" required placeholder="Bytes" />
-            <Input
-              name="sha256"
-              required
-              minLength={64}
-              maxLength={64}
-              placeholder="SHA-256"
-              className="@md:col-span-2"
-            />
-          </fieldset>
+          <label className="flex flex-col gap-1 text-base sm:text-sm">
+            Attached file
+            <Input name="attachment" type="file" required />
+            <span className="text-xs text-muted-foreground">
+              Enkode uploads and verifies the file before creating the immutable Version.
+            </span>
+          </label>
         )}
         {error ? <p className="text-destructive text-base sm:text-sm">{error}</p> : null}
         <Button type="submit" size="sm" className="self-start" disabled={saving}>

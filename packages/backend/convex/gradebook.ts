@@ -2,10 +2,12 @@ import { ConvexError, v } from "convex/values";
 
 import type { Doc, Id } from "./_generated/dataModel";
 import type { QueryCtx } from "./_generated/server";
-import { query } from "./_generated/server";
+import { mutation, query } from "./_generated/server";
+import { appendAuditEvent } from "./audit";
 import { requireClassroomTeacher, requireRole } from "./authorization";
 import { deriveDeadlineFacts, effectiveDeadline } from "./deadlinePolicy";
 import { deriveAssignmentStatus } from "./gradePolicy";
+import { requireWritableAssignmentRelease } from "./lifecycleGuards";
 import { releasePublicationStatus } from "./releasePolicy";
 
 function cellKey(assignmentReleaseId: Id<"assignmentReleases">, studentId: Id<"users">) {
@@ -40,35 +42,43 @@ async function readGradebook(ctx: QueryCtx, classroomId: Id<"classrooms">) {
   );
   const releaseRecords = await Promise.all(
     releases.map(async (release) => {
-      const [assignment, version, submissions, grades, deadlineExceptions] = await Promise.all([
-        ctx.db.get(release.assignmentId),
-        ctx.db.get(release.assignmentVersionId),
-        ctx.db
-          .query("submissions")
-          .withIndex("by_release_student_attempt", (index) =>
-            index.eq("assignmentReleaseId", release._id),
-          )
-          .collect(),
-        ctx.db
-          .query("grades")
-          .withIndex("by_release_student", (index) => index.eq("assignmentReleaseId", release._id))
-          .collect(),
-        ctx.db
-          .query("deadlineExceptions")
-          .withIndex("by_release", (index) => index.eq("assignmentReleaseId", release._id))
-          .collect(),
-      ]);
+      const [assignment, version, submissions, grades, deadlineExceptions, excuses] =
+        await Promise.all([
+          ctx.db.get(release.assignmentId),
+          ctx.db.get(release.assignmentVersionId),
+          ctx.db
+            .query("submissions")
+            .withIndex("by_release_student_attempt", (index) =>
+              index.eq("assignmentReleaseId", release._id),
+            )
+            .collect(),
+          ctx.db
+            .query("grades")
+            .withIndex("by_release_student", (index) =>
+              index.eq("assignmentReleaseId", release._id),
+            )
+            .collect(),
+          ctx.db
+            .query("deadlineExceptions")
+            .withIndex("by_release", (index) => index.eq("assignmentReleaseId", release._id))
+            .collect(),
+          ctx.db
+            .query("assignmentExcuses")
+            .withIndex("by_release", (index) => index.eq("assignmentReleaseId", release._id))
+            .collect(),
+        ]);
       if (!assignment || !version) {
         throw new ConvexError("Assignment Release content is unavailable");
       }
-      return { assignment, deadlineExceptions, grades, release, submissions, version };
+      return { assignment, deadlineExceptions, excuses, grades, release, submissions, version };
     }),
   );
 
   const academicStudentIds = new Set<Id<"users">>();
-  for (const { grades, submissions } of releaseRecords) {
+  for (const { excuses, grades, submissions } of releaseRecords) {
     for (const submission of submissions) academicStudentIds.add(submission.studentId);
     for (const grade of grades) academicStudentIds.add(grade.studentId);
+    for (const excuse of excuses) academicStudentIds.add(excuse.studentId);
   }
   const relevantEnrollments = enrollments.filter(
     (enrollment) => enrollment.status === "active" || academicStudentIds.has(enrollment.studentId),
@@ -126,14 +136,15 @@ async function readGradebook(ctx: QueryCtx, classroomId: Id<"classrooms">) {
       displayName: student.displayName,
       username: student.username,
       enrollmentStatus: enrollment.status,
-      cells: releaseRecords.map(({ deadlineExceptions, release }) => {
+      cells: releaseRecords.map(({ deadlineExceptions, excuses, release }) => {
         const key = cellKey(release._id, student._id);
         const attempts = submissionsByCell.get(key) ?? [];
         const grade = gradesByCell.get(key);
         const latestSubmission = newestAttempt(attempts);
         const exception = deadlineExceptions.find(({ studentId }) => studentId === student._id);
         const deadline = effectiveDeadline(release, exception);
-        const excused = enrollment.status === "ended" && attempts.length === 0 && !grade;
+        const excuse = excuses.find(({ studentId }) => studentId === student._id);
+        const excused = excuse !== undefined;
         const deadlineFacts = deriveDeadlineFacts({
           deadlineAt: deadline.deadlineAt,
           attemptsUsed: attempts.length,
@@ -143,6 +154,7 @@ async function readGradebook(ctx: QueryCtx, classroomId: Id<"classrooms">) {
         return {
           assignmentReleaseId: release._id,
           points: grade?.points,
+          excuseReason: excuse?.reason,
           deadlineFacts: { ...deadlineFacts, missing: !excused && deadlineFacts.missing },
           status: deriveAssignmentStatus({
             excused,
@@ -158,6 +170,87 @@ async function readGradebook(ctx: QueryCtx, classroomId: Id<"classrooms">) {
 export const forClassroom = query({
   args: { classroomId: v.id("classrooms") },
   handler: async (ctx, { classroomId }) => await readGradebook(ctx, classroomId),
+});
+
+function cleanReason(reason: string | undefined) {
+  const cleaned = reason?.trim();
+  return cleaned || undefined;
+}
+
+export const setExcuse = mutation({
+  args: {
+    assignmentReleaseId: v.id("assignmentReleases"),
+    studentId: v.id("users"),
+    reason: v.optional(v.string()),
+  },
+  handler: async (ctx, { assignmentReleaseId, studentId, reason }) => {
+    const release = await requireWritableAssignmentRelease(ctx, assignmentReleaseId);
+    const { organization, user } = await requireClassroomTeacher(ctx, release.classroomId);
+    const [student, enrollment, existing] = await Promise.all([
+      ctx.db.get(studentId),
+      ctx.db
+        .query("enrollments")
+        .withIndex("by_classroom_student", (index) =>
+          index.eq("classroomId", release.classroomId).eq("studentId", studentId),
+        )
+        .unique(),
+      ctx.db
+        .query("assignmentExcuses")
+        .withIndex("by_release_student", (index) =>
+          index.eq("assignmentReleaseId", assignmentReleaseId).eq("studentId", studentId),
+        )
+        .unique(),
+    ]);
+    if (!student || student.role !== "student" || !enrollment) throw new ConvexError("Forbidden");
+    const now = Date.now();
+    const excuseId = existing
+      ? existing._id
+      : await ctx.db.insert("assignmentExcuses", {
+          organizationId: organization._id,
+          assignmentReleaseId,
+          studentId,
+          reason: cleanReason(reason),
+          setBy: user._id,
+          createdAt: now,
+          updatedAt: now,
+        });
+    if (existing) {
+      await ctx.db.patch(existing._id, {
+        reason: cleanReason(reason),
+        setBy: user._id,
+        updatedAt: now,
+      });
+    }
+    await appendAuditEvent(ctx, {
+      organizationId: organization._id,
+      actor: { kind: "user", userId: user._id },
+      action: existing ? "assignment_excuse.updated" : "assignment_excuse.set",
+      target: { kind: "assignment_excuse", id: excuseId },
+    });
+    return excuseId;
+  },
+});
+
+export const clearExcuse = mutation({
+  args: { assignmentReleaseId: v.id("assignmentReleases"), studentId: v.id("users") },
+  handler: async (ctx, { assignmentReleaseId, studentId }) => {
+    const release = await requireWritableAssignmentRelease(ctx, assignmentReleaseId);
+    const { organization, user } = await requireClassroomTeacher(ctx, release.classroomId);
+    const excuse = await ctx.db
+      .query("assignmentExcuses")
+      .withIndex("by_release_student", (index) =>
+        index.eq("assignmentReleaseId", assignmentReleaseId).eq("studentId", studentId),
+      )
+      .unique();
+    if (!excuse) return;
+    await appendAuditEvent(ctx, {
+      organizationId: organization._id,
+      actor: { kind: "user", userId: user._id },
+      action: "assignment_excuse.cleared",
+      target: { kind: "assignment_excuse", id: excuse._id },
+    });
+    await ctx.db.delete(excuse._id);
+  },
 });
 
 export const listClassrooms = query({

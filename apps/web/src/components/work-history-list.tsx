@@ -1,18 +1,9 @@
-import { api } from "@enkode.app/backend/convex/_generated/api";
+import { api } from "@/lib/convex-api";
 import { Link } from "@tanstack/react-router";
 import { useQuery } from "convex/react";
 
-type HistorySummary = {
-  workspaceId: string;
-  assignmentTitle: string;
-  classroomName: string;
-  studentName: string;
-  studentUsername: string;
-  committedThrough: number;
-};
-
 export default function WorkHistoryList({ role }: { role: "student" | "teacher" }) {
-  const histories = useQuery(api.workHistoryReplay.listAccessible) as HistorySummary[] | undefined;
+  const histories = useQuery(api.workHistoryReplay.listAccessible);
   return (
     <section className="flex flex-col gap-4 border-t border-foreground/10 pt-8">
       <div className="flex flex-col gap-1">

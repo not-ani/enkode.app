@@ -210,7 +210,7 @@ async function seed(backend: ReturnType<typeof convexTest>) {
     await ctx.db.patch(deltaGrade, { latestReturnId: deltaReturn });
     await addSubmission(students.ended!, 1);
 
-    return { classroomId, earlier, later, teacherId };
+    return { classroomId, earlier, later, students, teacherId };
   });
 }
 
@@ -265,7 +265,7 @@ describe("Classroom Gradebook", () => {
       ],
       Ended: [
         { points: undefined, status: "submitted" },
-        { points: undefined, status: "excused" },
+        { points: undefined, status: "awaiting_submission" },
       ],
       Gamma: [
         { points: 8, status: "awaiting_review" },
@@ -275,6 +275,57 @@ describe("Classroom Gradebook", () => {
     expect(result.students[0]?.cells[0]?.deadlineFacts).toEqual({ missing: true, late: false });
     expect(result.students[1]?.cells[0]?.deadlineFacts).toEqual({ missing: false, late: true });
     expect(result.students[3]?.cells[1]?.deadlineFacts).toEqual({ missing: false, late: false });
+  });
+
+  it("uses an explicit Teacher-controlled excuse instead of Enrollment state", async () => {
+    const backend = convexTest(schema, modules);
+    const { classroomId, later, students, teacherId } = await seed(backend);
+    const teacher = backend.withIdentity({ subject: "teacher" });
+    await teacher.mutation(api.gradebook.setExcuse, {
+      assignmentReleaseId: later.assignmentReleaseId,
+      studentId: students.ended!,
+      reason: "Transferred after this unit",
+    });
+
+    let gradebook = await teacher.query(api.gradebook.forClassroom, { classroomId });
+    const ended = gradebook.students.find(
+      ({ username }: { username: string }) => username === "ended",
+    )!;
+    expect(ended.cells[1]).toMatchObject({
+      status: "excused",
+      excuseReason: "Transferred after this unit",
+    });
+    const excuse = await backend.run(async (ctx) =>
+      ctx.db
+        .query("assignmentExcuses")
+        .withIndex("by_release_student", (index) =>
+          index
+            .eq("assignmentReleaseId", later.assignmentReleaseId)
+            .eq("studentId", students.ended!),
+        )
+        .unique(),
+    );
+    expect(excuse).toMatchObject({ setBy: teacherId });
+
+    await teacher.mutation(api.gradebook.clearExcuse, {
+      assignmentReleaseId: later.assignmentReleaseId,
+      studentId: students.ended!,
+    });
+    gradebook = await teacher.query(api.gradebook.forClassroom, { classroomId });
+    expect(
+      gradebook.students.find(({ username }: { username: string }) => username === "ended")!
+        .cells[1]!.status,
+    ).toBe("awaiting_submission");
+    const events = await backend.run(async (ctx) =>
+      ctx.db
+        .query("auditEvents")
+        .filter((query) => query.eq(query.field("targetKind"), "assignment_excuse"))
+        .collect(),
+    );
+    expect(events.map(({ action }) => action)).toEqual([
+      "assignment_excuse.set",
+      "assignment_excuse.cleared",
+    ]);
   });
 
   it("keeps adopted Versions and archived Classrooms available as historical Gradebooks", async () => {

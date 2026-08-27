@@ -199,6 +199,19 @@ export const create = mutation({
     });
     const assignment = await ctx.db.get(assignmentId);
     if (!assignment) throw new ConvexError("Assignment could not be created");
+    const lastLibraryItem = await ctx.db
+      .query("courseLibraryItems")
+      .withIndex("by_course", (index) => index.eq("courseId", courseId))
+      .order("desc")
+      .first();
+    await ctx.db.insert("courseLibraryItems", {
+      organizationId: organization._id,
+      courseId,
+      kind: "assignment",
+      assignmentId,
+      order: (lastLibraryItem?.order ?? -1) + 1,
+      createdAt: Date.now(),
+    });
     const assignmentVersionId = await insertVersion(ctx, assignment, user._id, versionInput);
     await appendAuditEvent(ctx, {
       organizationId: organization._id,

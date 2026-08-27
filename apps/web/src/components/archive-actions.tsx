@@ -1,13 +1,11 @@
-import { api } from "@enkode.app/backend/convex/_generated/api";
+import { api } from "@/lib/convex-api";
 import { Button } from "@enkode.app/ui/components/button";
 import { useMutation } from "convex/react";
 import { useState } from "react";
 
-type Target = "assignment" | "material" | "course" | "classroom";
+import { messageFrom } from "@/lib/error-message";
 
-function messageFrom(error: unknown) {
-  return error instanceof Error ? error.message : "Could not update this item";
-}
+type Target = "assignment" | "material" | "course" | "classroom";
 
 export default function ArchiveActions({ id, target }: { id: string; target: Target }) {
   const archiveAssignment = useMutation(api.archive.archiveAssignment);
@@ -18,6 +16,24 @@ export default function ArchiveActions({ id, target }: { id: string; target: Tar
   const deleteMaterial = useMutation(api.archive.deleteMaterialDraft);
   const deleteCourse = useMutation(api.archive.deleteCourseDraft);
   const deleteClassroom = useMutation(api.archive.deleteClassroomDraft);
+  const operations = {
+    assignment: {
+      archive: () => archiveAssignment({ assignmentId: id }),
+      remove: () => deleteAssignment({ assignmentId: id }),
+    },
+    material: {
+      archive: () => archiveMaterial({ materialId: id }),
+      remove: () => deleteMaterial({ materialId: id }),
+    },
+    course: {
+      archive: () => archiveCourse({ courseId: id }),
+      remove: () => deleteCourse({ courseId: id }),
+    },
+    classroom: {
+      archive: () => archiveClassroom({ classroomId: id }),
+      remove: () => deleteClassroom({ classroomId: id }),
+    },
+  } satisfies Record<Target, { archive: () => Promise<unknown>; remove: () => Promise<unknown> }>;
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
@@ -26,10 +42,7 @@ export default function ArchiveActions({ id, target }: { id: string; target: Tar
     setBusy(true);
     setError(undefined);
     try {
-      if (target === "assignment") await archiveAssignment({ assignmentId: id });
-      else if (target === "material") await archiveMaterial({ materialId: id });
-      else if (target === "course") await archiveCourse({ courseId: id });
-      else await archiveClassroom({ classroomId: id });
+      await operations[target].archive();
     } catch (caught) {
       setError(messageFrom(caught));
     } finally {
@@ -45,10 +58,7 @@ export default function ArchiveActions({ id, target }: { id: string; target: Tar
     setBusy(true);
     setError(undefined);
     try {
-      if (target === "assignment") await deleteAssignment({ assignmentId: id });
-      else if (target === "material") await deleteMaterial({ materialId: id });
-      else if (target === "course") await deleteCourse({ courseId: id });
-      else await deleteClassroom({ classroomId: id });
+      await operations[target].remove();
     } catch (caught) {
       setError(messageFrom(caught));
       setConfirmingDelete(false);

@@ -1,92 +1,39 @@
-import { api } from "@enkode.app/backend/convex/_generated/api";
+import { api } from "@/lib/convex-api";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useAction, useMutation, useQuery } from "convex/react";
+import type { FunctionReturnType } from "convex/server";
 import { useCallback, useEffect, useState } from "react";
 
-import WorkspaceEditor, {
-  type RunResult,
-  type SubmissionResult,
-} from "@/components/workspace-editor";
+import WorkspaceEditor from "@/components/workspace-editor";
 import { WorkspaceViewers } from "@/components/live-workspace-viewer";
-import type { StarterFileDecision, StarterFileMerge, WorkspaceFile } from "@/lib/workspace-state";
+import type { StarterFileDecision } from "@/lib/workspace-state";
 import type { WorkHistoryChunk } from "@/lib/work-history";
-import { languageLabel, type WorkspaceLanguage } from "@/lib/language-intelligence";
+import { languageLabel } from "@/lib/language-intelligence";
+import { messageFrom } from "@/lib/error-message";
 
 export const Route = createFileRoute("/_auth/assignment-releases/$assignmentReleaseId")({
   component: AssignmentWorkspaceRoute,
 });
 
-type Release = {
-  _id: string;
-  assignmentTitle: string;
-  classroomName: string;
-  instructions: string;
-  language: WorkspaceLanguage;
-  runtimeVersion: string;
-  entrypoint: string;
-  version: number;
-  effectiveDeadline: {
-    deadlinePolicy: "no_deadline" | "accept_late" | "hard_close";
-    deadlineAt?: number;
-  };
-  submissionEligibility: { canSubmit: boolean; reason?: string; remainingAttempts?: number };
-  deadlineFacts: { missing: boolean; late: boolean };
-};
-
-type Workspace = {
-  _id: string;
-  files: WorkspaceFile[];
-  language: WorkspaceLanguage;
-  runtimeVersion: string;
-  entrypoint: string;
-  version: number;
-  versionMerge?: {
-    mergeId: string;
-    fromVersion: number;
-    toVersion: number;
-    fromAssignmentVersionId: string;
-    toAssignmentVersionId: string;
-    changedStarterFiles: StarterFileMerge[];
-  };
-};
-
-type ReturnedGrade = {
-  status: "awaiting_submission" | "submitted" | "awaiting_review" | "returned" | "excused";
-  returned: null | {
-    points: number;
-    proposedPoints: number;
-    overallFeedback?: string;
-    revision: number;
-    returnedAt: number;
-    inlineFeedback: {
-      path: string;
-      startLine: number;
-      startColumn: number;
-      endLine: number;
-      endColumn: number;
-      body: string;
-    }[];
-  };
-};
+type Workspace = FunctionReturnType<typeof api.workspaces.open>;
+type ReturnedGrade = FunctionReturnType<typeof api.grades.mine>;
 
 function AssignmentWorkspaceRoute() {
   const { assignmentReleaseId } = Route.useParams();
-  const release = useQuery(api.assignmentReleases.open, { assignmentReleaseId }) as
-    | Release
-    | undefined;
+  const release = useQuery(api.assignmentReleases.open, { assignmentReleaseId });
   const openWorkspace = useMutation(api.workspaces.open);
   const saveWorkspace = useMutation(api.workspaces.save);
   const completeVersionMerge = useMutation(api.workspaces.completeVersionMerge);
   const acceptHistoryChunk = useAction(api.workHistoryUpload.acceptChunk);
   const runWorkspace = useAction(api.runs.run);
   const submitWorkspace = useAction(api.submissionUpload.submit);
-  const grade = useQuery(api.grades.mine, { assignmentReleaseId }) as ReturnedGrade | undefined;
+  const grade = useQuery(api.grades.mine, { assignmentReleaseId });
   const [workspace, setWorkspace] = useState<Workspace>();
   const [error, setError] = useState<string>();
   const submissions = useQuery(
     api.submissions.mine,
     workspace ? { workspaceId: workspace._id } : "skip",
-  ) as SubmissionResult[] | undefined;
+  );
   const uploadHistory = useCallback(
     async (chunk: WorkHistoryChunk) =>
       await acceptHistoryChunk({
@@ -107,11 +54,11 @@ function AssignmentWorkspaceRoute() {
   useEffect(() => {
     let active = true;
     void openWorkspace({ assignmentReleaseId })
-      .then((opened: Workspace) => {
+      .then((opened) => {
         if (active) setWorkspace(opened);
       })
       .catch((caught: unknown) => {
-        if (active) setError(caught instanceof Error ? caught.message : "Could not open Workspace");
+        if (active) setError(messageFrom(caught, "Could not open Workspace"));
       });
     return () => {
       active = false;
@@ -182,27 +129,25 @@ function AssignmentWorkspaceRoute() {
             decisions: StarterFileDecision[],
             requiredHistorySequence: number,
           ) => {
-            const updated = (await completeVersionMerge({
+            const updated = await completeVersionMerge({
               mergeId,
               decisions,
               acknowledged: true,
               requiredHistorySequence,
-            })) as Workspace;
+            });
             setWorkspace(updated);
           }}
           onUploadHistory={uploadHistory}
-          onRun={async (files) =>
-            (await runWorkspace({ workspaceId: workspace._id, files })) as RunResult
-          }
+          onRun={async (files) => await runWorkspace({ workspaceId: workspace._id, files })}
           submissions={submissions ?? []}
           submissionEligibility={release.submissionEligibility}
           onSubmit={async (files, requiredHistorySequence, idempotencyKey) =>
-            (await submitWorkspace({
+            await submitWorkspace({
               workspaceId: workspace._id,
               files,
               requiredHistorySequence,
               idempotencyKey,
-            })) as SubmissionResult
+            })
           }
           onSave={async (files) => {
             await saveWorkspace({ workspaceId: workspace._id, files });

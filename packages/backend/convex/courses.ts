@@ -109,6 +109,81 @@ export const get = query({
   },
 });
 
+export const library = query({
+  args: { courseId: v.id("courses") },
+  handler: async (ctx, { courseId }) => {
+    await requireCourseCollaborator(ctx, courseId);
+    const items = await ctx.db
+      .query("courseLibraryItems")
+      .withIndex("by_course", (index) => index.eq("courseId", courseId))
+      .collect();
+    const presented = await Promise.all(
+      items.map(async (item) => {
+        const content = item.assignmentId
+          ? await ctx.db.get(item.assignmentId)
+          : item.materialId
+            ? await ctx.db.get(item.materialId)
+            : null;
+        if (!content || content.archivedAt !== undefined) return null;
+        return {
+          id: item._id,
+          kind: item.kind,
+          contentId: content._id,
+          title: content.title,
+          order: item.order,
+        };
+      }),
+    );
+    return presented
+      .filter((item) => item !== null)
+      .sort((left, right) => left.order - right.order || left.title.localeCompare(right.title));
+  },
+});
+
+export const moveLibraryItem = mutation({
+  args: {
+    courseId: v.id("courses"),
+    itemId: v.id("courseLibraryItems"),
+    direction: v.union(v.literal("up"), v.literal("down")),
+  },
+  handler: async (ctx, { courseId, itemId, direction }) => {
+    const { organization, user } = await requireCourseCollaborator(ctx, courseId);
+    await requireWritableCourse(ctx, courseId);
+    const storedItems = await ctx.db
+      .query("courseLibraryItems")
+      .withIndex("by_course", (index) => index.eq("courseId", courseId))
+      .collect();
+    const items = (
+      await Promise.all(
+        storedItems.map(async (item) => ({
+          item,
+          content: item.assignmentId
+            ? await ctx.db.get(item.assignmentId)
+            : item.materialId
+              ? await ctx.db.get(item.materialId)
+              : null,
+        })),
+      )
+    )
+      .filter(({ content }) => content && content.archivedAt === undefined)
+      .map(({ item }) => item);
+    items.sort((left, right) => left.order - right.order || left.createdAt - right.createdAt);
+    const index = items.findIndex(({ _id }) => _id === itemId);
+    if (index === -1) throw new ConvexError("Course library item not found");
+    const otherIndex = direction === "up" ? index - 1 : index + 1;
+    const other = items[otherIndex];
+    if (!other) return;
+    await ctx.db.patch(items[index]!._id, { order: other.order });
+    await ctx.db.patch(other._id, { order: items[index]!.order });
+    await appendAuditEvent(ctx, {
+      organizationId: organization._id,
+      actor: { kind: "user", userId: user._id },
+      action: "course.library_reordered",
+      target: { kind: "course", id: courseId },
+    });
+  },
+});
+
 export const update = mutation({
   args: { courseId: v.id("courses"), ...courseFields },
   handler: async (ctx, { courseId, ...changes }) => {

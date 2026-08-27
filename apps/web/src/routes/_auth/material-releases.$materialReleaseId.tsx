@@ -1,4 +1,4 @@
-import { api } from "@enkode.app/backend/convex/_generated/api";
+import { api } from "@/lib/convex-api";
 import { Link, createFileRoute } from "@tanstack/react-router";
 import { useQuery } from "convex/react";
 
@@ -6,24 +6,9 @@ export const Route = createFileRoute("/_auth/material-releases/$materialReleaseI
   component: MaterialReleaseRoute,
 });
 
-type MaterialRelease = {
-  materialTitle: string;
-  classroomName?: string;
-  kind: "rich_text" | "file" | "external_link";
-  richText?: string;
-  externalUrl?: string;
-  attachment?: {
-    filename: string;
-    contentType: string;
-    byteSize: number;
-  };
-};
-
 function MaterialReleaseRoute() {
   const { materialReleaseId } = Route.useParams();
-  const material = useQuery(api.materialReleases.open, { materialReleaseId }) as
-    | MaterialRelease
-    | undefined;
+  const material = useQuery(api.materialReleases.open, { materialReleaseId });
 
   if (!material) {
     return <main className="p-6 text-sm text-muted-foreground">Opening Material…</main>;

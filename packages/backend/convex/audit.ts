@@ -17,6 +17,7 @@ const targetKinds = [
   "assignment_version",
   "assignment_release",
   "deadline_exception",
+  "assignment_excuse",
   "grade_return",
   "workspace",
   "material",
@@ -88,6 +89,10 @@ async function scopeForTarget(ctx: MutationCtx, target: AuditEvent["target"]): P
         ctx,
         exception ? await ctx.db.get(exception.assignmentReleaseId) : null,
       );
+    }
+    case "assignment_excuse": {
+      const excuse = await ctx.db.get(target.id as Id<"assignmentExcuses">);
+      return await releaseScope(ctx, excuse ? await ctx.db.get(excuse.assignmentReleaseId) : null);
     }
     case "grade_return": {
       const gradeReturn = await ctx.db.get(target.id as Id<"gradeReturns">);

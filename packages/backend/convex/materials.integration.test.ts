@@ -94,6 +94,10 @@ describe("versioned Materials", () => {
   beforeEach(() => {
     vi.stubEnv("ENKODE_OBJECT_STORAGE_PROVIDER", "s3-compatible");
     vi.stubEnv("ENKODE_OBJECT_STORAGE_BUCKET", "enkode-test");
+    vi.stubEnv("ENKODE_OBJECT_STORAGE_ENDPOINT", "https://storage.example.test");
+    vi.stubEnv("ENKODE_OBJECT_STORAGE_REGION", "auto");
+    vi.stubEnv("ENKODE_OBJECT_STORAGE_ACCESS_KEY_ID", "test-access-key");
+    vi.stubEnv("ENKODE_OBJECT_STORAGE_SECRET_ACCESS_KEY", "test-secret-key");
   });
 
   afterEach(() => {
@@ -138,18 +142,23 @@ describe("versioned Materials", () => {
     ]);
   });
 
-  it("registers file receipts through configured object storage with exportable metadata", async () => {
+  it("uploads and verifies attachment bytes through configured object storage", async () => {
     const backend = createTestBackend();
     const { classroomId, courseId, teacher } = await seedContext(backend);
+    const bytes = new TextEncoder().encode("verified course guide");
+    const fetch = vi.fn(async (_url: URL, init?: RequestInit) =>
+      init?.method === "PUT" ? new Response(null, { status: 200 }) : new Response(bytes),
+    );
+    vi.stubGlobal("fetch", fetch);
+    const uploaded = await teacher.action(api.materialUpload.upload, {
+      courseId,
+      filename: "Course Guide.pdf",
+      contentType: "application/pdf",
+      bytes: bytes.buffer,
+    });
     const content = {
       kind: "file" as const,
-      attachment: {
-        storageKey: "organizations/north/materials/guide.pdf",
-        filename: "Course Guide.pdf",
-        contentType: "application/pdf",
-        byteSize: 2048,
-        sha256: "a".repeat(64),
-      },
+      attachmentId: uploaded.attachmentId,
     };
     const { materialVersionId } = await teacher.mutation(api.materials.create, {
       courseId,
@@ -163,7 +172,10 @@ describe("versioned Materials", () => {
       attachment: {
         storageProvider: "s3-compatible",
         storageBucket: "enkode-test",
-        ...content.attachment,
+        filename: "Course Guide.pdf",
+        contentType: "application/pdf",
+        byteSize: bytes.byteLength,
+        sha256: uploaded.sha256,
       },
     });
     const materialReleaseId = await teacher.mutation(api.materialReleases.create, {
@@ -175,21 +187,26 @@ describe("versioned Materials", () => {
       attachment: {
         storageProvider: "s3-compatible",
         storageBucket: "enkode-test",
-        ...content.attachment,
+        filename: "Course Guide.pdf",
+        contentType: "application/pdf",
+        byteSize: bytes.byteLength,
+        sha256: uploaded.sha256,
       },
     });
+    expect(fetch).toHaveBeenCalledTimes(2);
     await expect(
       teacher.mutation(api.materials.create, { courseId, title: "Duplicate", content }),
-    ).rejects.toThrow("already registered");
+    ).rejects.toThrow("already in use");
 
-    vi.stubEnv("ENKODE_OBJECT_STORAGE_BUCKET", "");
+    vi.stubEnv("ENKODE_OBJECT_STORAGE_ENDPOINT", "");
     await expect(
-      teacher.mutation(api.materials.create, {
+      teacher.action(api.materialUpload.upload, {
         courseId,
-        title: "Missing boundary",
-        content: { ...content, attachment: { ...content.attachment, storageKey: "other.pdf" } },
+        filename: "other.pdf",
+        contentType: "application/pdf",
+        bytes: bytes.buffer,
       }),
-    ).rejects.toThrow("Object storage is not configured");
+    ).rejects.toThrow("object storage is not configured");
   });
 
   it("pins a released Version until a Classroom Teacher explicitly adopts another", async () => {

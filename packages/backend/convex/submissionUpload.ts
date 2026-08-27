@@ -20,7 +20,7 @@ export const submit = action({
     requiredHistorySequence: v.number(),
     idempotencyKey: v.string(),
   },
-  handler: async (ctx, input): Promise<Record<string, unknown>> => {
+  handler: async (ctx, input) => {
     const prepared = await ctx.runQuery(internal.submissions.prepare, input);
     if ("existing" in prepared) return prepared.existing;
     const storage = objectStorageFromEnvironment();

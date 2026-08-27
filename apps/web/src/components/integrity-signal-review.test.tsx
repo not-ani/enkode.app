@@ -15,6 +15,7 @@ describe("Integrity Signal review", () => {
         type: "file_change" as const,
         path: "main.py",
         origin: "paste",
+        observedAt: 1,
         changes: [{ rangeOffset: 0, rangeLength: 0, text: "code" }],
       },
     }));

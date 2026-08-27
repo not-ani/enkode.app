@@ -1,14 +1,12 @@
-import { api } from "@enkode.app/backend/convex/_generated/api";
+import { api } from "@/lib/convex-api";
 import { Link } from "@tanstack/react-router";
 import { useQuery } from "convex/react";
 import { useState } from "react";
 
-import { assignmentStatusLabel, type GradebookData } from "@/lib/gradebook";
-
-type Classroom = { _id: string; name: string; courseName: string; archived: boolean };
+import { assignmentStatusLabel } from "@/lib/gradebook";
 
 export default function Gradebook() {
-  const classrooms = useQuery(api.gradebook.listClassrooms, {}) as Classroom[] | undefined;
+  const classrooms = useQuery(api.gradebook.listClassrooms, {});
   const [classroomId, setClassroomId] = useState("");
   const availableClassrooms = classrooms ?? [];
   const selectedClassroomId = availableClassrooms.some(({ _id }) => _id === classroomId)
@@ -17,7 +15,7 @@ export default function Gradebook() {
   const gradebook = useQuery(
     api.gradebook.forClassroom,
     selectedClassroomId ? { classroomId: selectedClassroomId } : "skip",
-  ) as GradebookData | undefined;
+  );
   if (!classrooms) return <p className="text-sm text-muted-foreground">Loading Gradebook…</p>;
 
   return (

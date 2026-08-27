@@ -169,6 +169,7 @@ async function seedAcademicRecord(test: ReturnType<typeof backend>) {
     await ctx.db.patch(gradeId, { latestReturnId: gradeReturnId });
     const attachmentId = await ctx.db.insert("materialAttachments", {
       organizationId,
+      courseId,
       storageProvider: "s3-compatible",
       storageBucket: "materials",
       storageKey: "guide.pdf",

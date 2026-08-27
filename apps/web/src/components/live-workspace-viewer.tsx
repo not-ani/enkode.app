@@ -1,72 +1,20 @@
-import { api } from "@enkode.app/backend/convex/_generated/api";
-import { useMutation, useQuery } from "convex/react";
-import { lazy, Suspense, useEffect, useState } from "react";
+import { api } from "@/lib/convex-api";
+import { useQuery } from "convex/react";
+import { lazy, Suspense, useState } from "react";
 
-import type { WorkspaceFile } from "@/lib/workspace-state";
-import { languageLabel, type WorkspaceLanguage } from "@/lib/language-intelligence";
+import { languageLabel } from "@/lib/language-intelligence";
+
+import { useTeacherPresence } from "./use-teacher-presence";
 
 const MonacoEditor = lazy(() => import("./workspace-monaco"));
-const HEARTBEAT_INTERVAL_MS = 20_000;
-
-type LiveWorkspace = {
-  files: WorkspaceFile[];
-  updatedAt: number;
-  assignmentTitle: string;
-  classroomName: string;
-  studentDisplayName: string;
-  studentUsername: string;
-  entrypoint: string;
-  language: WorkspaceLanguage;
-  runtimeVersion: string;
-};
 
 export default function LiveWorkspaceViewer({ workspaceId }: { workspaceId: string }) {
-  const [sessionId, setSessionId] = useState<string>();
-  const enter = useMutation(api.liveWorkspaces.enter);
-  const heartbeat = useMutation(api.liveWorkspaces.heartbeat);
-  const leave = useMutation(api.liveWorkspaces.leave);
-  const [entered, setEntered] = useState(false);
+  const { entered, error, sessionId } = useTeacherPresence(workspaceId, "workspace");
   const [activePath, setActivePath] = useState<string>();
-  const [error, setError] = useState<string>();
   const workspace = useQuery(
     api.liveWorkspaces.watch,
     entered && sessionId ? { workspaceId, sessionId } : "skip",
-  ) as LiveWorkspace | undefined;
-
-  useEffect(() => {
-    setSessionId(crypto.randomUUID());
-  }, [workspaceId]);
-
-  useEffect(() => {
-    if (!sessionId) return;
-    let active = true;
-    let heartbeatTimer: number | undefined;
-    void enter({ workspaceId, sessionId })
-      .then(() => {
-        if (!active) {
-          void leave({ workspaceId, sessionId });
-          return;
-        }
-        setEntered(true);
-        heartbeatTimer = window.setInterval(() => {
-          void heartbeat({ workspaceId, sessionId }).catch(() => {
-            if (heartbeatTimer !== undefined) window.clearInterval(heartbeatTimer);
-            setEntered(false);
-          });
-        }, HEARTBEAT_INTERVAL_MS);
-      })
-      .catch((caught: unknown) => {
-        if (active) {
-          setError(caught instanceof Error ? caught.message : "Could not open live Workspace");
-        }
-      });
-
-    return () => {
-      active = false;
-      if (heartbeatTimer !== undefined) window.clearInterval(heartbeatTimer);
-      void leave({ workspaceId, sessionId });
-    };
-  }, [enter, heartbeat, leave, sessionId, workspaceId]);
+  );
 
   if (error) return <p className="p-6 text-destructive">{error}</p>;
   if (!workspace) {
@@ -151,14 +99,17 @@ export default function LiveWorkspaceViewer({ workspaceId }: { workspaceId: stri
 }
 
 export function WorkspaceViewers({ workspaceId }: { workspaceId: string }) {
-  const viewers = useQuery(api.liveWorkspaces.listViewers, { workspaceId }) as
-    | { teacherId: string; displayName: string }[]
-    | undefined;
+  const viewers = useQuery(api.liveWorkspaces.listViewers, { workspaceId });
   if (!viewers?.length) return null;
   return (
     <p role="status" className="border border-primary/30 bg-primary/5 px-3 py-2 text-sm">
-      {viewers.map(({ displayName }) => displayName).join(", ")}{" "}
-      {viewers.length === 1 ? "is" : "are"} viewing your Workspace.
+      {viewers
+        .map(
+          ({ displayName, viewKind }) =>
+            `${displayName} (${viewKind === "work_history" ? "Work History" : "Workspace"})`,
+        )
+        .join(", ")}{" "}
+      {viewers.length === 1 ? "is" : "are"} viewing your work.
     </p>
   );
 }

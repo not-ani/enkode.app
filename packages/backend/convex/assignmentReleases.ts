@@ -706,8 +706,9 @@ export const open = query({
       throw new ConvexError("Forbidden");
     }
     await requireActiveEnrollment(ctx, release.classroomId, user._id);
-    const [summary, starterFiles, evaluationTests] = await Promise.all([
+    const [summary, classroom, starterFiles, evaluationTests] = await Promise.all([
       releaseSummary(ctx, release),
+      ctx.db.get(release.classroomId),
       ctx.db
         .query("assignmentStarterFiles")
         .withIndex("by_version", (index) =>
@@ -722,9 +723,10 @@ export const open = query({
         .collect(),
     ]);
     const version = await ctx.db.get(release.assignmentVersionId);
-    if (!version) throw new ConvexError("Assignment Release content is unavailable");
+    if (!version || !classroom) throw new ConvexError("Assignment Release content is unavailable");
     return {
       ...summary,
+      classroomName: classroom.name,
       ...(await studentDeadlineSummary(ctx, release, user._id)),
       instructions: version.instructions,
       entrypoint: version.entrypoint,
