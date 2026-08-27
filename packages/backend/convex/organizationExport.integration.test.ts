@@ -331,6 +331,22 @@ async function seed(test: ReturnType<typeof backend>) {
       archivedAt: 54,
       archivedBy: teacherId,
     });
+    const assignmentLibraryItemId = await ctx.db.insert("courseLibraryItems", {
+      organizationId,
+      courseId,
+      kind: "assignment",
+      assignmentId,
+      order: 1,
+      createdAt: 12,
+    });
+    const materialLibraryItemId = await ctx.db.insert("courseLibraryItems", {
+      organizationId,
+      courseId,
+      kind: "material",
+      materialId,
+      order: 0,
+      createdAt: 13,
+    });
     const materialVersionId = await ctx.db.insert("materialVersions", {
       organizationId,
       materialId,
@@ -351,7 +367,37 @@ async function seed(test: ReturnType<typeof backend>) {
       createdBy: teacherId,
       createdAt: 3,
     });
-    return { classroomId, courseId, gradeId, gradeReturnId, organizationId, teacherId };
+    const assignmentExcuseId = await ctx.db.insert("assignmentExcuses", {
+      organizationId,
+      assignmentReleaseId,
+      studentId,
+      reason: "Transferred after this unit",
+      setBy: teacherId,
+      createdAt: 14,
+      updatedAt: 15,
+    });
+    await ctx.db.insert("auditEvents", {
+      organizationId,
+      courseId,
+      classroomId,
+      actorKind: "user",
+      actorUserId: teacherId,
+      action: "assignment_excuse.set",
+      targetKind: "assignment_excuse",
+      targetId: assignmentExcuseId,
+      occurredAt: 15,
+    });
+    return {
+      assignmentExcuseId,
+      assignmentLibraryItemId,
+      classroomId,
+      courseId,
+      gradeId,
+      gradeReturnId,
+      materialLibraryItemId,
+      organizationId,
+      teacherId,
+    };
   });
   return { attachment, history, historySnapshot, ids, submissionSnapshot };
 }
@@ -378,6 +424,8 @@ describe("Organization Export", () => {
     const snapshot = await test.query(internal.organizationExportRead.readOrganizationSnapshot, {
       organizationSlug: "north",
     });
+    expect(snapshot.records.courseLibraryItems).toHaveLength(2);
+    expect(snapshot.records.assignmentExcuses).toHaveLength(1);
     const first = await buildOrganizationExport(
       () => Promise.resolve(snapshot),
       storage,
@@ -416,6 +464,29 @@ describe("Organization Export", () => {
       "typescript",
       "java",
     ]);
+    expect(bundle.records.courseLibraryItems).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: seeded.ids.assignmentLibraryItemId,
+          courseId: seeded.ids.courseId,
+          kind: "assignment",
+          order: 1,
+        }),
+        expect.objectContaining({
+          id: seeded.ids.materialLibraryItemId,
+          courseId: seeded.ids.courseId,
+          kind: "material",
+          order: 0,
+        }),
+      ]),
+    );
+    expect(bundle.records.assignmentExcuses[0]).toMatchObject({
+      id: seeded.ids.assignmentExcuseId,
+      reason: "Transferred after this unit",
+      setBy: seeded.ids.teacherId,
+      createdAt: 14,
+      updatedAt: 15,
+    });
     expect(bundle.records.grades[0]).toMatchObject({
       id: seeded.ids.gradeId,
       overallFeedback: "Good work",
@@ -428,14 +499,26 @@ describe("Organization Export", () => {
     expect(bundle.records.runs).toHaveLength(1);
     expect(bundle.records.materialReleases).toHaveLength(1);
     expect(bundle.records.integritySignals).toHaveLength(1);
-    expect(bundle.records.auditEvents[0]).toMatchObject({
-      courseId: seeded.ids.courseId,
-      classroomId: seeded.ids.classroomId,
-      actorUserId: seeded.ids.teacherId,
-      action: "grade.returned",
-      targetKind: "grade_return",
-      targetId: seeded.ids.gradeReturnId,
-    });
+    expect(bundle.records.auditEvents).toContainEqual(
+      expect.objectContaining({
+        courseId: seeded.ids.courseId,
+        classroomId: seeded.ids.classroomId,
+        actorUserId: seeded.ids.teacherId,
+        action: "grade.returned",
+        targetKind: "grade_return",
+        targetId: seeded.ids.gradeReturnId,
+      }),
+    );
+    expect(bundle.records.auditEvents).toContainEqual(
+      expect.objectContaining({
+        courseId: seeded.ids.courseId,
+        classroomId: seeded.ids.classroomId,
+        actorUserId: seeded.ids.teacherId,
+        action: "assignment_excuse.set",
+        targetKind: "assignment_excuse",
+        targetId: seeded.ids.assignmentExcuseId,
+      }),
+    );
     expect(bundle.objects).toHaveLength(4);
     expect(bundle.objects.map((object) => object.sha256).sort()).toEqual(
       [seeded.attachment, seeded.history, seeded.historySnapshot, seeded.submissionSnapshot]
